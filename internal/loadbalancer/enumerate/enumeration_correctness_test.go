@@ -2,6 +2,7 @@ package loadbalancer
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,6 +17,8 @@ type stubELBV2ResourceClient struct {
 	targetGroupInput *elasticloadbalancingv2.DescribeTargetGroupsInput
 	certificatePages []*elasticloadbalancingv2.DescribeListenerCertificatesOutput
 	targetHealth     *elasticloadbalancingv2.DescribeTargetHealthOutput
+	listenerOutput   *elasticloadbalancingv2.DescribeListenersOutput
+	certificateErr   error
 }
 
 func (s *stubELBV2ResourceClient) DescribeListeners(
@@ -23,6 +26,9 @@ func (s *stubELBV2ResourceClient) DescribeListeners(
 	*elasticloadbalancingv2.DescribeListenersInput,
 	...func(*elasticloadbalancingv2.Options),
 ) (*elasticloadbalancingv2.DescribeListenersOutput, error) {
+	if s.listenerOutput != nil {
+		return s.listenerOutput, nil
+	}
 	return &elasticloadbalancingv2.DescribeListenersOutput{}, nil
 }
 
@@ -31,9 +37,35 @@ func (s *stubELBV2ResourceClient) DescribeListenerCertificates(
 	_ *elasticloadbalancingv2.DescribeListenerCertificatesInput,
 	_ ...func(*elasticloadbalancingv2.Options),
 ) (*elasticloadbalancingv2.DescribeListenerCertificatesOutput, error) {
+	if s.certificateErr != nil {
+		return nil, s.certificateErr
+	}
 	output := s.certificatePages[0]
 	s.certificatePages = s.certificatePages[1:]
 	return output, nil
+}
+
+func TestListenerRetainsDefaultCertificateWhenCertificateListingFails(t *testing.T) {
+	t.Parallel()
+
+	client := &stubELBV2ResourceClient{
+		listenerOutput: &elasticloadbalancingv2.DescribeListenersOutput{Listeners: []elbv2types.Listener{{
+			ListenerArn: aws.String("listener"),
+			Certificates: []elbv2types.Certificate{{
+				CertificateArn: aws.String("default-certificate"),
+				IsDefault:      aws.Bool(true),
+			}},
+		}}},
+		certificateErr: errors.New("certificate listing denied"),
+	}
+
+	listeners, errs := listenersForLoadBalancerV2(context.Background(), client, aws.String("load-balancer"))
+
+	require.Equal(t, []string{"certificate listing denied"}, errs)
+	require.Len(t, listeners, 1)
+	require.Len(t, listeners[0].Certificates, 1)
+	assert.Equal(t, "default-certificate", listeners[0].Certificates[0].Arn)
+	assert.True(t, listeners[0].Certificates[0].IsDefault)
 }
 
 func (s *stubELBV2ResourceClient) DescribeTargetGroups(

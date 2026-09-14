@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2/types"
+	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
@@ -47,17 +48,19 @@ func EnumerateWAF(ctx context.Context, awsConfig aws.Config, config waffern.WafE
 			svc1log.SafeParam("wafCount", len(wafs)))
 	}
 
-	cloudFrontConfig := awsConfig.Copy()
-	cloudFrontConfig.Region = "us-east-1"
-	cloudFrontWAFs, cloudFrontErrors := enumerateWAFForScope(
-		ctx,
-		wafv2.NewFromConfig(cloudFrontConfig),
-		"us-east-1",
-		types.ScopeCloudfront,
-		waffern.ScopeTypeCloudfront,
-	)
-	allErrors = append(allErrors, cloudFrontErrors...)
-	allWafs = append(allWafs, cloudFrontWAFs...)
+	if cloudFrontRegion, ok := cloudFrontWAFRegion(awsConfig.Region, config.Regions); ok {
+		cloudFrontConfig := awsConfig.Copy()
+		cloudFrontConfig.Region = cloudFrontRegion
+		cloudFrontWAFs, cloudFrontErrors := enumerateWAFForScope(
+			ctx,
+			wafv2.NewFromConfig(cloudFrontConfig),
+			cloudFrontRegion,
+			types.ScopeCloudfront,
+			waffern.ScopeTypeCloudfront,
+		)
+		allErrors = append(allErrors, cloudFrontErrors...)
+		allWafs = append(allWafs, cloudFrontWAFs...)
+	}
 
 	// Set the results
 	if len(allWafs) > 0 {
@@ -65,6 +68,18 @@ func EnumerateWAF(ctx context.Context, awsConfig aws.Config, config waffern.WafE
 	}
 	report.Errors = allErrors
 	return report
+}
+
+func cloudFrontWAFRegion(configRegion string, regions []string) (string, bool) {
+	region := configRegion
+	if len(regions) > 0 {
+		region = regions[0]
+	}
+	partition, ok := endpoints.PartitionForRegion(endpoints.DefaultPartitions(), region)
+	if !ok || partition.ID() != endpoints.AwsPartitionID {
+		return "", false
+	}
+	return "us-east-1", true
 }
 
 // enumerateWAFForRegion enumerates WAFs for a given region
@@ -145,12 +160,9 @@ func enumerateWAFForScope(
 		}
 
 		if awsScope == types.ScopeRegional {
-			resourceArns, err := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
-			if err != nil {
-				errors = append(errors, err.Error())
-			} else {
-				resourceInfo.LoadBalancer, resourceInfo.ApiGateway = referencesFromResourceARNs(resourceArns, region)
-			}
+			resourceArns, resourceErrors := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
+			errors = append(errors, resourceErrors...)
+			resourceInfo.LoadBalancer, resourceInfo.ApiGateway = referencesFromResourceARNs(resourceArns, region)
 		}
 
 		waf := waffern.WafInstance{
@@ -317,13 +329,14 @@ func getStatementType(statement *types.Statement) waffern.StatementType {
 	}
 }
 
-func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string, region string) ([]string, error) {
+func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string, region string) ([]string, []string) {
 	log := svc1log.FromContext(ctx)
 	resourceTypes := []types.ResourceType{
 		types.ResourceTypeApplicationLoadBalancer,
 		types.ResourceTypeApiGateway,
 	}
 	var resourceARNs []string
+	var errors []string
 	for _, resourceType := range resourceTypes {
 		output, err := wafClient.ListResourcesForWebACL(ctx, &wafv2.ListResourcesForWebACLInput{
 			WebACLArn:    webACLArn,
@@ -335,13 +348,14 @@ func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string
 				svc1log.SafeParam("resourceType", resourceType),
 				svc1log.SafeParam("region", region),
 				svc1log.Stacktrace(err))
-			return resourceARNs, err
+			errors = append(errors, err.Error())
+			continue
 		}
 		if output != nil {
 			resourceARNs = append(resourceARNs, output.ResourceArns...)
 		}
 	}
-	return resourceARNs, nil
+	return resourceARNs, errors
 }
 
 func referencesFromResourceARNs(resourceARNs []string, region string) (*common.LoadBalancerReference, *common.ApiGatewayReference) {

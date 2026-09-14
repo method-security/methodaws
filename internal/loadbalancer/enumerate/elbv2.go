@@ -190,10 +190,11 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 				portValue := int(*listener.Port)
 				port = &portValue
 			}
-			var certificates []*loadbalancerfern.Certificate
+			certificates := certificatesFromListener(listener.Certificates)
 			if len(listener.Certificates) > 0 {
 				var errs []string
-				certificates, errs = certificatesForListenerV2(ctx, client, listener.ListenerArn)
+				discoveredCertificates, errs := certificatesForListenerV2(ctx, client, listener.ListenerArn)
+				certificates = mergeCertificates(certificates, discoveredCertificates)
 				if len(errs) > 0 {
 					errorMessages = append(errorMessages, errs...)
 				}
@@ -217,6 +218,38 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 		}
 	}
 	return listeners, errorMessages
+}
+
+func certificatesFromListener(certificates []types.Certificate) []*loadbalancerfern.Certificate {
+	result := make([]*loadbalancerfern.Certificate, 0, len(certificates))
+	for _, certificate := range certificates {
+		if certificate.CertificateArn == nil {
+			continue
+		}
+		result = append(result, &loadbalancerfern.Certificate{
+			Arn:       *certificate.CertificateArn,
+			IsDefault: aws.ToBool(certificate.IsDefault),
+		})
+	}
+	return result
+}
+
+func mergeCertificates(certificateGroups ...[]*loadbalancerfern.Certificate) []*loadbalancerfern.Certificate {
+	var result []*loadbalancerfern.Certificate
+	seen := make(map[string]struct{})
+	for _, certificates := range certificateGroups {
+		for _, certificate := range certificates {
+			if certificate == nil {
+				continue
+			}
+			if _, ok := seen[certificate.Arn]; ok {
+				continue
+			}
+			seen[certificate.Arn] = struct{}{}
+			result = append(result, certificate)
+		}
+	}
+	return result
 }
 
 func targetGroupForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, loadBalancerArn *string, region string) ([]*loadbalancerfern.TargetGroupInstance, []string) {

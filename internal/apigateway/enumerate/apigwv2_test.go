@@ -2,6 +2,7 @@ package apigateway
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -18,6 +19,9 @@ type stubAPIGatewayV2PaginationClient struct {
 	stageTokens    []*string
 	domainTokens   []*string
 	mappingTokens  []*string
+	stageErrors    []error
+	domainErrors   []error
+	mappingErrors  []error
 }
 
 func (s *stubAPIGatewayV2PaginationClient) GetStages(
@@ -28,7 +32,12 @@ func (s *stubAPIGatewayV2PaginationClient) GetStages(
 	s.stageTokens = append(s.stageTokens, input.NextToken)
 	output := s.stageOutputs[0]
 	s.stageOutputs = s.stageOutputs[1:]
-	return output, nil
+	var err error
+	if len(s.stageErrors) > 0 {
+		err = s.stageErrors[0]
+		s.stageErrors = s.stageErrors[1:]
+	}
+	return output, err
 }
 
 func (s *stubAPIGatewayV2PaginationClient) GetDomainNames(
@@ -39,7 +48,12 @@ func (s *stubAPIGatewayV2PaginationClient) GetDomainNames(
 	s.domainTokens = append(s.domainTokens, input.NextToken)
 	output := s.domainOutputs[0]
 	s.domainOutputs = s.domainOutputs[1:]
-	return output, nil
+	var err error
+	if len(s.domainErrors) > 0 {
+		err = s.domainErrors[0]
+		s.domainErrors = s.domainErrors[1:]
+	}
+	return output, err
 }
 
 func (s *stubAPIGatewayV2PaginationClient) GetApiMappings(
@@ -50,7 +64,60 @@ func (s *stubAPIGatewayV2PaginationClient) GetApiMappings(
 	s.mappingTokens = append(s.mappingTokens, input.NextToken)
 	output := s.mappingOutputs[0]
 	s.mappingOutputs = s.mappingOutputs[1:]
-	return output, nil
+	var err error
+	if len(s.mappingErrors) > 0 {
+		err = s.mappingErrors[0]
+		s.mappingErrors = s.mappingErrors[1:]
+	}
+	return output, err
+}
+
+func TestHTTPAPICallersUsePagesCollectedBeforeFailure(t *testing.T) {
+	t.Parallel()
+
+	client := &stubAPIGatewayV2PaginationClient{
+		stageOutputs: []*apigatewayv2.GetStagesOutput{
+			{Items: []types.Stage{{
+				StageName: aws.String("prod"),
+				AccessLogSettings: &types.AccessLogSettings{
+					DestinationArn: aws.String("arn:aws:logs:us-east-1:123456789012:log-group:api"),
+				},
+			}}, NextToken: aws.String("next")},
+			nil,
+		},
+		stageErrors: []error{nil, errors.New("stage page denied")},
+		domainOutputs: []*apigatewayv2.GetDomainNamesOutput{
+			{Items: []types.DomainName{{
+				DomainName: aws.String("api.example"),
+				DomainNameConfigurations: []types.DomainNameConfiguration{{
+					CertificateArn: aws.String("arn:aws:acm:us-east-1:123456789012:certificate/example"),
+				}},
+			}}, NextToken: aws.String("next")},
+			nil,
+		},
+		domainErrors: []error{nil, errors.New("domain page denied")},
+		mappingOutputs: []*apigatewayv2.GetApiMappingsOutput{{
+			Items: []types.ApiMapping{{ApiId: aws.String("api-id")}},
+		}},
+	}
+
+	stages, stageErr := getAllHTTPAPIStages(context.Background(), client, "api-id")
+	require.Error(t, stageErr)
+	assert.Equal(t, "prod", aws.ToString(primaryHTTPAPIStage(stages)))
+
+	settings, settingsErr := getHTTPAPIAccessLogSettings(context.Background(), &stubAPIGatewayV2PaginationClient{
+		stageOutputs: []*apigatewayv2.GetStagesOutput{
+			{Items: stages, NextToken: aws.String("next")}, nil,
+		},
+		stageErrors: []error{nil, errors.New("stage page denied")},
+	}, "api-id")
+	require.Error(t, settingsErr)
+	require.NotNil(t, settings)
+
+	certificates, certificateErrors := getHTTPAPICertificates(context.Background(), client, "api-id")
+	require.Len(t, certificateErrors, 1)
+	require.Len(t, certificates, 1)
+	assert.Equal(t, "arn:aws:acm:us-east-1:123456789012:certificate/example", certificates[0].Arn)
 }
 
 func TestHTTPAPIPaginationHelpersCollectEveryPage(t *testing.T) {

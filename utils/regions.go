@@ -26,12 +26,9 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 
 	log.Info("Starting GetAWSRegions function")
 
-	queryRegion := cfg.Region
-	if queryRegion == "" {
-		queryRegion = "us-east-1"
-		if len(selectedRegions) > 0 && selectedRegions[0] != "" {
-			queryRegion = selectedRegions[0]
-		}
+	queryRegion, err := regionDiscoveryQueryRegion(cfg.Region, selectedRegions)
+	if err != nil {
+		return nil, err
 	}
 
 	queryConfig := cfg.Copy()
@@ -44,6 +41,32 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 
 	log.Info("Discovered enabled AWS regions", svc1log.SafeParam("regions", regions))
 	return regions, nil
+}
+
+func regionDiscoveryQueryRegion(configRegion string, selectedRegions []string) (string, error) {
+	for _, region := range selectedRegions {
+		if region == "" {
+			continue
+		}
+		partition, ok := endpoints.PartitionForRegion(endpoints.DefaultPartitions(), region)
+		if !ok {
+			return "", fmt.Errorf("no AWS partition found for region %q", region)
+		}
+		for _, selectedRegion := range selectedRegions {
+			if selectedRegion == "" {
+				continue
+			}
+			selectedPartition, selected := endpoints.PartitionForRegion(endpoints.DefaultPartitions(), selectedRegion)
+			if !selected || selectedPartition.ID() != partition.ID() {
+				return "", fmt.Errorf("selected AWS regions must belong to one partition")
+			}
+		}
+		return region, nil
+	}
+	if configRegion != "" {
+		return configRegion, nil
+	}
+	return "us-east-1", nil
 }
 
 type describeRegionsAPI interface {

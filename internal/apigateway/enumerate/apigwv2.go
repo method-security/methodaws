@@ -139,18 +139,10 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 
 	// Get stages for this API
 	stages, err := getAllHTTPAPIStages(ctx, client, *api.ApiId)
-	var primaryStageName *string
 	if err != nil {
 		errors = append(errors, err.Error())
-	} else if len(stages) > 0 {
-		// Use the first non-$default stage found
-		for _, stage := range stages {
-			if stage.StageName != nil && *stage.StageName != "$default" {
-				primaryStageName = stage.StageName
-				break
-			}
-		}
 	}
+	primaryStageName := primaryHTTPAPIStage(stages)
 
 	// Get access log settings
 	accessLogSettings, err := getHTTPAPIAccessLogSettings(ctx, client, *api.ApiId)
@@ -196,6 +188,15 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	}
 
 	return apiGatewayInstance, errors
+}
+
+func primaryHTTPAPIStage(stages []types.Stage) *string {
+	for _, stage := range stages {
+		if stage.StageName != nil && *stage.StageName != "$default" {
+			return stage.StageName
+		}
+	}
+	return nil
 }
 
 // getHTTPAPIRoutes retrieves routes for an HTTP API
@@ -424,13 +425,18 @@ func createV2LoadBalancerBackend(integration *apigatewayv2.GetIntegrationOutput,
 }
 
 // getHTTPAPICertificates retrieves certificates for an HTTP API
-func getHTTPAPICertificates(ctx context.Context, client *apigatewayv2.Client, apiID string) ([]*apigatewayfern.Certificate, []string) {
+type httpAPICertificateAPI interface {
+	getDomainNamesAPI
+	getAPIMappingsAPI
+}
+
+func getHTTPAPICertificates(ctx context.Context, client httpAPICertificateAPI, apiID string) ([]*apigatewayfern.Certificate, []string) {
 	var certificates []*apigatewayfern.Certificate
 	var errors []string
 
 	allDomains, err := getAllHTTPAPIDomainNames(ctx, client)
 	if err != nil {
-		return certificates, []string{err.Error()}
+		errors = append(errors, err.Error())
 	}
 
 	for _, domain := range allDomains {
@@ -442,7 +448,6 @@ func getHTTPAPICertificates(ctx context.Context, client *apigatewayv2.Client, ap
 		mappings, err := getAllHTTPAPIMappings(ctx, client, *domain.DomainName)
 		if err != nil {
 			errors = append(errors, err.Error())
-			continue
 		}
 
 		// Check if any mapping is for our API
@@ -480,11 +485,8 @@ func getHTTPAPICertificates(ctx context.Context, client *apigatewayv2.Client, ap
 }
 
 // getHTTPAPIAccessLogSettings retrieves access log configuration
-func getHTTPAPIAccessLogSettings(ctx context.Context, client *apigatewayv2.Client, apiID string) (*apigatewayfern.AccessLogSettings, error) {
+func getHTTPAPIAccessLogSettings(ctx context.Context, client getStagesAPI, apiID string) (*apigatewayfern.AccessLogSettings, error) {
 	stages, err := getAllHTTPAPIStages(ctx, client, apiID)
-	if err != nil {
-		return nil, err
-	}
 
 	// Look for access log settings in any stage (typically $default)
 	for _, stage := range stages {
@@ -492,11 +494,11 @@ func getHTTPAPIAccessLogSettings(ctx context.Context, client *apigatewayv2.Clien
 			return &apigatewayfern.AccessLogSettings{
 				DestinationArn: *stage.AccessLogSettings.DestinationArn,
 				Format:         stage.AccessLogSettings.Format,
-			}, nil
+			}, err
 		}
 	}
 
-	return nil, nil
+	return nil, err
 }
 
 type getStagesAPI interface {

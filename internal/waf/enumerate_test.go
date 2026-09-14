@@ -2,6 +2,7 @@ package waf
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	waffern "github.com/Method-Security/methodaws/generated/go/waf"
@@ -17,6 +18,7 @@ type stubWAFClient struct {
 	listScopes        []types.Scope
 	resourceListCalls int
 	resourceTypes     []types.ResourceType
+	resourceErrors    map[types.ResourceType]error
 }
 
 func (s *stubWAFClient) ListWebACLs(
@@ -45,6 +47,9 @@ func (s *stubWAFClient) ListResourcesForWebACL(
 ) (*wafv2.ListResourcesForWebACLOutput, error) {
 	s.resourceListCalls++
 	s.resourceTypes = append(s.resourceTypes, input.ResourceType)
+	if err := s.resourceErrors[input.ResourceType]; err != nil {
+		return nil, err
+	}
 	if input.ResourceType == types.ResourceTypeApplicationLoadBalancer {
 		return &wafv2.ListResourcesForWebACLOutput{ResourceArns: []string{
 			"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/example/abc",
@@ -53,6 +58,33 @@ func (s *stubWAFClient) ListResourcesForWebACL(
 	return &wafv2.ListResourcesForWebACLOutput{ResourceArns: []string{
 		"arn:aws:apigateway:us-east-1::/restapis/api-id/stages/prod",
 	}}, nil
+}
+
+func TestCloudFrontWAFRegionRequiresCommercialPartition(t *testing.T) {
+	t.Parallel()
+
+	region, ok := cloudFrontWAFRegion("", []string{"us-west-2"})
+	assert.True(t, ok)
+	assert.Equal(t, "us-east-1", region)
+
+	_, ok = cloudFrontWAFRegion("", []string{"us-gov-west-1"})
+	assert.False(t, ok)
+	_, ok = cloudFrontWAFRegion("", []string{"cn-north-1"})
+	assert.False(t, ok)
+}
+
+func TestResourcesForWebACLContinuesAfterOneResourceTypeFails(t *testing.T) {
+	t.Parallel()
+
+	client := &stubWAFClient{resourceErrors: map[types.ResourceType]error{
+		types.ResourceTypeApplicationLoadBalancer: errors.New("load balancer associations denied"),
+	}}
+	resources, errs := resourcesForWebACL(context.Background(), client, aws.String("web-acl"), "us-east-1")
+
+	require.Equal(t, []string{"load balancer associations denied"}, errs)
+	assert.Equal(t, 2, client.resourceListCalls)
+	require.Len(t, resources, 1)
+	assert.Contains(t, resources[0], ":apigateway:")
 }
 
 func TestEnumerateWAFForScopePaginatesAndListsAssociationsOnce(t *testing.T) {

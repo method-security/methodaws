@@ -62,6 +62,21 @@ func TestEnabledAWSRegionsHandlesMissingResponseAndErrors(t *testing.T) {
 	require.EqualError(t, err, "describe enabled AWS regions: denied")
 }
 
+func TestRegionDiscoveryQueryRegionUsesSelectedPartition(t *testing.T) {
+	t.Parallel()
+
+	region, err := regionDiscoveryQueryRegion("us-east-1", []string{"us-gov-west-1", "us-gov-east-1"})
+	require.NoError(t, err)
+	assert.Equal(t, "us-gov-west-1", region)
+
+	region, err = regionDiscoveryQueryRegion("", []string{"cn-north-1"})
+	require.NoError(t, err)
+	assert.Equal(t, "cn-north-1", region)
+
+	_, err = regionDiscoveryQueryRegion("", []string{"us-east-1", "us-gov-west-1"})
+	require.EqualError(t, err, "selected AWS regions must belong to one partition")
+}
+
 func TestGeneralRegionsAreSortedAndDeduplicated(t *testing.T) {
 	regions := GetGeneralRegionsList()
 
