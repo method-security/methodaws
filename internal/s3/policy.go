@@ -226,18 +226,69 @@ func evaluatePolicyCapability(
 ) *bool {
 	unknown := false
 	for _, operationForBucket := range operations {
-		decision := evaluatePolicyOperation(statements, operationForBucket(bucketARN))
-		if decision != nil && *decision {
-			return boolPointer(true)
-		}
-		if decision == nil {
-			unknown = true
+		operation := operationForBucket(bucketARN)
+		for _, resource := range policyOperationResources(statements, bucketARN, operation) {
+			operation.resource = resource
+			decision := evaluatePolicyOperation(statements, operation)
+			if decision != nil && *decision {
+				return boolPointer(true)
+			}
+			if decision == nil {
+				unknown = true
+			}
 		}
 	}
 	if unknown {
 		return nil
 	}
 	return boolPointer(false)
+}
+
+func policyOperationResources(
+	statements []policyStatement,
+	bucketARN string,
+	operation policyOperation,
+) []string {
+	resources := []string{operation.resource}
+	if !strings.HasPrefix(operation.resource, bucketARN+"/") {
+		return resources
+	}
+
+	seen := map[string]struct{}{operation.resource: {}}
+	for _, statement := range statements {
+		if !strings.EqualFold(statement.Effect, "Allow") ||
+			statementPublicPrincipal(statement) == matchNo ||
+			valuesMatch(statement.Action, statement.NotAction, operation.action, true) == matchNo {
+			continue
+		}
+		for _, resourcePattern := range statement.Resource {
+			resource, ok := objectResourceProbe(resourcePattern, bucketARN)
+			if !ok {
+				continue
+			}
+			if _, exists := seen[resource]; exists {
+				continue
+			}
+			seen[resource] = struct{}{}
+			resources = append(resources, resource)
+		}
+	}
+	return resources
+}
+
+func objectResourceProbe(resourcePattern, bucketARN string) (string, bool) {
+	separator := strings.Index(resourcePattern, "/")
+	if separator < 0 || !wildcardMatch(resourcePattern[:separator], bucketARN, false) {
+		return "", false
+	}
+
+	objectPattern := resourcePattern[separator+1:]
+	if objectPattern == "" {
+		return "", false
+	}
+	objectKey := strings.NewReplacer("*", "method-public-probe", "?", "x").Replace(objectPattern)
+	resource := bucketARN + "/" + objectKey
+	return resource, wildcardMatch(resourcePattern, resource, false)
 }
 
 func evaluatePolicyOperation(statements []policyStatement, operation policyOperation) *bool {
@@ -415,6 +466,20 @@ func classifyAllowConditionEntry(operator, key string, rawValues json.RawMessage
 		return classifySourceIPCondition(operator, rawValues)
 	}
 	if _, ok := trustedConditionKeys[normalizedKey]; ok {
+		if isForAllValuesPositiveOperator(operator) {
+			// ForAllValues is true for a missing request key unless a separate Null condition requires it.
+			return conditionPublic
+		}
+		if strings.EqualFold(operator, "Null") {
+			values, err := decodeStringList(rawValues)
+			if err != nil || len(values) != 1 {
+				return conditionUnknown
+			}
+			if strings.EqualFold(values[0], "false") {
+				return conditionRestricted
+			}
+			return conditionPublic
+		}
 		if isPositiveConditionOperator(operator) {
 			fixed, err := conditionValuesAreFixed(rawValues)
 			if err != nil || !fixed {
@@ -467,6 +532,14 @@ func isPositiveConditionOperator(operator string) bool {
 		return false
 	}
 	operator = strings.TrimPrefix(operator, "foranyvalue:")
+	return operator == "stringequals" || operator == "arnequals" || operator == "stringlike" || operator == "arnlike"
+}
+
+func isForAllValuesPositiveOperator(operator string) bool {
+	operator = strings.ToLower(operator)
+	if !strings.HasPrefix(operator, "forallvalues:") || strings.HasSuffix(operator, "ifexists") {
+		return false
+	}
 	operator = strings.TrimPrefix(operator, "forallvalues:")
 	return operator == "stringequals" || operator == "arnequals" || operator == "stringlike" || operator == "arnlike"
 }
@@ -552,6 +625,9 @@ func classifyDenyCondition(condition map[string]map[string]json.RawMessage) deny
 				return denyUnknown
 			}
 			if isNegativeConditionOperator(operator) {
+				return denyBlocksPublic
+			}
+			if isForAllValuesPositiveOperator(operator) {
 				return denyBlocksPublic
 			}
 			if isPositiveConditionOperator(operator) {

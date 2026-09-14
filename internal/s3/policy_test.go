@@ -48,6 +48,40 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: boolPointer(true),
 		},
 		{
+			name: "public access to an object prefix",
+			policy: `{
+				"Statement": [{
+					"Effect": "Allow",
+					"Principal": "*",
+					"Action": ["s3:GetObject", "s3:PutObject"],
+					"Resource": "arn:aws:s3:::example-bucket/public/*"
+				}]
+			}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(true),
+		},
+		{
+			name: "deny on the same object prefix overrides public access",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/public/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/public/*"
+					}
+				]
+			}`,
+			publicRead:  boolPointer(false),
+			publicWrite: boolPointer(false),
+		},
+		{
 			name: "named AWS principal is not public",
 			policy: `{
 				"Statement": [{
@@ -178,6 +212,59 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 				}]
 			}`,
 			publicRead:  nil,
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "ForAllValues without Null remains public when the key is absent",
+			policy: `{
+				"Statement": [{
+					"Effect": "Allow",
+					"Principal": "*",
+					"Action": "s3:GetObject",
+					"Resource": "arn:aws:s3:::example-bucket/*",
+					"Condition": {"ForAllValues:StringEquals": {"aws:SourceVpc": "vpc-12345678"}}
+				}]
+			}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "Null check makes ForAllValues require the trusted key",
+			policy: `{
+				"Statement": [{
+					"Effect": "Allow",
+					"Principal": "*",
+					"Action": "s3:GetObject",
+					"Resource": "arn:aws:s3:::example-bucket/*",
+					"Condition": {
+						"ForAllValues:StringEquals": {"aws:SourceVpc": "vpc-12345678"},
+						"Null": {"aws:SourceVpc": "false"}
+					}
+				}]
+			}`,
+			publicRead:  boolPointer(false),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "ForAllValues deny applies when the key is absent",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*",
+						"Condition": {"ForAllValues:StringEquals": {"aws:SourceVpc": "vpc-12345678"}}
+					}
+				]
+			}`,
+			publicRead:  boolPointer(false),
 			publicWrite: boolPointer(false),
 		},
 	}

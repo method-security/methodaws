@@ -300,16 +300,16 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	}
 
 	accountPABConfig := awscfg.Copy()
+	accountPABConfig.Region = accountPublicAccessBlockRegion(accountPABConfig.Region, config.Regions)
+	accountPAB := publicAccessBlockState{}
 	if accountPABConfig.Region == "" {
-		if len(config.Regions) > 0 {
-			accountPABConfig.Region = config.Regions[0]
-		} else {
-			accountPABConfig.Region = "us-east-1"
+		errors = append(errors, "get account Public Access Block: AWS region is unavailable")
+	} else {
+		var accountPABErr error
+		accountPAB, accountPABErr = accountPublicAccessBlock(ctx, accountPABConfig, config.AccountId)
+		if accountPABErr != nil {
+			errors = append(errors, accountPABErr.Error())
 		}
-	}
-	accountPAB, accountPABErr := accountPublicAccessBlock(ctx, accountPABConfig, config.AccountId)
-	if accountPABErr != nil {
-		errors = append(errors, accountPABErr.Error())
 	}
 
 	// Create a map of buckets by region for efficient processing
@@ -433,6 +433,16 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	}
 	report.Errors = append(errors, errorMessages...)
 	return report
+}
+
+func accountPublicAccessBlockRegion(configRegion string, regions []string) string {
+	if configRegion != "" {
+		return configRegion
+	}
+	if len(regions) > 0 {
+		return regions[0]
+	}
+	return ""
 }
 
 func normalizeBucketRegion(location types.BucketLocationConstraint) string {
