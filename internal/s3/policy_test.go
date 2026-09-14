@@ -1,6 +1,7 @@
 package s3
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -203,5 +204,45 @@ func TestAnalyzeBucketPolicyRejectsMalformedOrEmptyPolicies(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, permissions.publicRead)
 		assert.Nil(t, permissions.publicWrite)
+	}
+}
+
+func TestClassifyAllowConditionIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	condition := map[string]map[string]json.RawMessage{
+		"StringEquals": {
+			"aws:SourceVpc":             json.RawMessage(`"vpc-12345678"`),
+			"s3:ExistingObjectTag/team": json.RawMessage(`"security"`),
+		},
+	}
+	for range 1000 {
+		assert.Equal(t, conditionRestricted, classifyAllowCondition(condition))
+	}
+}
+
+func TestClassifySourceIPCondition(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		operator string
+		values   json.RawMessage
+		expected conditionResult
+	}{
+		{name: "fixed IPv4 range", operator: "IpAddress", values: json.RawMessage(`"10.0.0.0/24"`), expected: conditionRestricted},
+		{name: "fixed IPv6 range", operator: "IpAddress", values: json.RawMessage(`"fd00::/48"`), expected: conditionRestricted},
+		{name: "broad IPv4 range", operator: "IpAddress", values: json.RawMessage(`"0.0.0.0/1"`), expected: conditionPublic},
+		{name: "broad IPv6 range", operator: "IpAddress", values: json.RawMessage(`"::/0"`), expected: conditionPublic},
+		{name: "negative match", operator: "NotIpAddress", values: json.RawMessage(`"10.0.0.0/24"`), expected: conditionPublic},
+		{name: "unsupported operator", operator: "IpAddressIfExists", values: json.RawMessage(`"10.0.0.0/24"`), expected: conditionUnknown},
+		{name: "invalid range", operator: "IpAddress", values: json.RawMessage(`"invalid"`), expected: conditionUnknown},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.expected, classifySourceIPCondition(test.operator, test.values))
+		})
 	}
 }

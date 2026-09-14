@@ -183,13 +183,13 @@ func bucketPermissions(
 			log.Debug("Failed to get bucket Public Access Block configuration",
 				svc1log.SafeParam("bucketName", bucket.Identification.Name))
 		}
-	} else if publicAccessResult != nil {
+	} else if publicAccessResult == nil || publicAccessResult.PublicAccessBlockConfiguration == nil {
+		permissionErrors = append(permissionErrors, fmt.Errorf("GetPublicAccessBlock returned no bucket configuration"))
+	} else {
 		bucketPublicAccessBlock = publicAccessBlockState{
 			configuration: publicAccessResult.PublicAccessBlockConfiguration,
 			known:         true,
 		}
-	} else {
-		permissionErrors = append(permissionErrors, fmt.Errorf("GetPublicAccessBlock returned no response"))
 	}
 
 	accessControl, evaluationErr := evaluateS3Access(accessEvaluationInput{
@@ -230,8 +230,8 @@ func accountPublicAccessBlock(
 		}
 		return publicAccessBlockState{}, fmt.Errorf("get account Public Access Block: %w", err)
 	}
-	if output == nil {
-		return publicAccessBlockState{}, fmt.Errorf("GetPublicAccessBlock returned no account response")
+	if output == nil || output.PublicAccessBlockConfiguration == nil {
+		return publicAccessBlockState{}, fmt.Errorf("GetPublicAccessBlock returned no account configuration")
 	}
 	return publicAccessBlockState{
 		configuration: convertAccountPublicAccessBlock(output.PublicAccessBlockConfiguration),

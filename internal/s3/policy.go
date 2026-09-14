@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strings"
 )
@@ -385,7 +386,6 @@ var trustedConditionKeys = map[string]struct{}{
 var publicConditionKeys = map[string]struct{}{
 	"aws:referer":         {},
 	"aws:securetransport": {},
-	"aws:sourceip":        {},
 	"aws:useragent":       {},
 	"s3:tlsversion":       {},
 }
@@ -394,31 +394,71 @@ func classifyAllowCondition(condition map[string]map[string]json.RawMessage) con
 	if len(condition) == 0 {
 		return conditionPublic
 	}
+	result := conditionPublic
 	for operator, entries := range condition {
 		for key, rawValues := range entries {
-			normalizedKey := strings.ToLower(key)
-			if _, ok := trustedConditionKeys[normalizedKey]; ok {
-				if isPositiveConditionOperator(operator) {
-					fixed, err := conditionValuesAreFixed(rawValues)
-					if err != nil {
-						return conditionUnknown
-					}
-					if fixed {
-						return conditionRestricted
-					}
-					return conditionUnknown
-				}
-				if isNegativeConditionOperator(operator) {
-					return conditionPublic
-				}
-				return conditionUnknown
-			}
-			if _, ok := publicConditionKeys[normalizedKey]; !ok {
-				return conditionUnknown
+			switch classifyAllowConditionEntry(operator, key, rawValues) {
+			case conditionRestricted:
+				// Conditions are ANDed, so one fixed trust boundary proves the grant is not public.
+				return conditionRestricted
+			case conditionUnknown:
+				result = conditionUnknown
 			}
 		}
 	}
-	return conditionPublic
+	return result
+}
+
+func classifyAllowConditionEntry(operator, key string, rawValues json.RawMessage) conditionResult {
+	normalizedKey := strings.ToLower(key)
+	if normalizedKey == "aws:sourceip" {
+		return classifySourceIPCondition(operator, rawValues)
+	}
+	if _, ok := trustedConditionKeys[normalizedKey]; ok {
+		if isPositiveConditionOperator(operator) {
+			fixed, err := conditionValuesAreFixed(rawValues)
+			if err != nil || !fixed {
+				return conditionUnknown
+			}
+			return conditionRestricted
+		}
+		if isNegativeConditionOperator(operator) {
+			return conditionPublic
+		}
+		return conditionUnknown
+	}
+	if _, ok := publicConditionKeys[normalizedKey]; ok {
+		return conditionPublic
+	}
+	return conditionUnknown
+}
+
+func classifySourceIPCondition(operator string, rawValues json.RawMessage) conditionResult {
+	values, err := decodeStringList(rawValues)
+	if err != nil || len(values) == 0 {
+		return conditionUnknown
+	}
+	if strings.EqualFold(operator, "NotIpAddress") {
+		return conditionPublic
+	}
+	if !strings.EqualFold(operator, "IpAddress") {
+		return conditionUnknown
+	}
+
+	for _, value := range values {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			address, addressErr := netip.ParseAddr(value)
+			if addressErr != nil {
+				return conditionUnknown
+			}
+			prefix = netip.PrefixFrom(address, address.BitLen())
+		}
+		if (prefix.Addr().Is4() && prefix.Bits() < 8) || (prefix.Addr().Is6() && prefix.Bits() < 32) {
+			return conditionPublic
+		}
+	}
+	return conditionRestricted
 }
 
 func isPositiveConditionOperator(operator string) bool {
