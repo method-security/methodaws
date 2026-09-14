@@ -51,3 +51,26 @@ func TestBuildRelatedARNRejectsUnusableSourceARN(t *testing.T) {
 	_, err := BuildRelatedARN("arn:aws:s3:::example", "logs", "us-east-1", "log-group:example")
 	require.Error(t, err)
 }
+
+func TestBuildRegionalARNUsesRegionPartition(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"us-east-1":     "arn:aws:ec2:us-east-1:123456789012:instance/example",
+		"us-gov-west-1": "arn:aws-us-gov:ec2:us-gov-west-1:123456789012:instance/example",
+		"cn-north-1":    "arn:aws-cn:ec2:cn-north-1:123456789012:instance/example",
+	}
+	for region, expected := range tests {
+		actual, err := BuildRegionalARN(region, "ec2", "123456789012", "instance/example")
+		require.NoError(t, err)
+		assert.Equal(t, expected, actual)
+	}
+}
+
+func TestBuildGlobalARNForRegionOmitsARNRegion(t *testing.T) {
+	t.Parallel()
+
+	actual, err := BuildGlobalARNForRegion("us-gov-west-1", "s3", "", "example")
+	require.NoError(t, err)
+	assert.Equal(t, "arn:aws-us-gov:s3:::example", actual)
+}

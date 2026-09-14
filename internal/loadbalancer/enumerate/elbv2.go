@@ -157,7 +157,14 @@ func enumerateV2LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 	return loadBalancers, errorMessages
 }
 
-func listenersForLoadBalancerV2(ctx context.Context, client *elasticloadbalancingv2.Client, loadBalancerArn *string) ([]*loadbalancerfern.Listener, []string) {
+type elbv2ResourceAPI interface {
+	DescribeListeners(context.Context, *elasticloadbalancingv2.DescribeListenersInput, ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeListenersOutput, error)
+	DescribeListenerCertificates(context.Context, *elasticloadbalancingv2.DescribeListenerCertificatesInput, ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeListenerCertificatesOutput, error)
+	DescribeTargetGroups(context.Context, *elasticloadbalancingv2.DescribeTargetGroupsInput, ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error)
+	DescribeTargetHealth(context.Context, *elasticloadbalancingv2.DescribeTargetHealthInput, ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetHealthOutput, error)
+}
+
+func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, loadBalancerArn *string) ([]*loadbalancerfern.Listener, []string) {
 	log := svc1log.FromContext(ctx)
 
 	listeners := []*loadbalancerfern.Listener{}
@@ -183,10 +190,18 @@ func listenersForLoadBalancerV2(ctx context.Context, client *elasticloadbalancin
 				portValue := int(*listener.Port)
 				port = &portValue
 			}
+			var certificates []*loadbalancerfern.Certificate
+			if len(listener.Certificates) > 0 {
+				var errs []string
+				certificates, errs = certificatesForListenerV2(ctx, client, listener.ListenerArn)
+				if len(errs) > 0 {
+					errorMessages = append(errorMessages, errs...)
+				}
+			}
 			fernListener := &loadbalancerfern.Listener{
 				Arn:          *listener.ListenerArn,
 				Port:         port,
-				Certificates: certificatesForListenerV2(listener.Certificates),
+				Certificates: certificates,
 			}
 
 			// Convert protocol
@@ -204,11 +219,13 @@ func listenersForLoadBalancerV2(ctx context.Context, client *elasticloadbalancin
 	return listeners, errorMessages
 }
 
-func targetGroupForLoadBalancerV2(ctx context.Context, client *elasticloadbalancingv2.Client, loadBalancerArn *string, region string) ([]*loadbalancerfern.TargetGroupInstance, []string) {
+func targetGroupForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, loadBalancerArn *string, region string) ([]*loadbalancerfern.TargetGroupInstance, []string) {
 	log := svc1log.FromContext(ctx)
 	targetGroups := []*loadbalancerfern.TargetGroupInstance{}
 	errorMessages := []string{}
-	paginator := elasticloadbalancingv2.NewDescribeTargetGroupsPaginator(client, &elasticloadbalancingv2.DescribeTargetGroupsInput{})
+	paginator := elasticloadbalancingv2.NewDescribeTargetGroupsPaginator(client, &elasticloadbalancingv2.DescribeTargetGroupsInput{
+		LoadBalancerArn: loadBalancerArn,
+	})
 
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -218,20 +235,9 @@ func targetGroupForLoadBalancerV2(ctx context.Context, client *elasticloadbalanc
 		}
 
 		for _, awsTargetGroup := range page.TargetGroups {
-			if awsTargetGroup.LoadBalancerArns == nil {
-				log.Warn("Target group name is nil for target group", svc1log.SafeParam("targetGroup", awsTargetGroup))
-				errorMessages = append(errorMessages, "Target group name is nil")
-				continue
-			}
-			// Filter target groups by current load balancer ARN
-			isAttachedToLB := false
-			for _, lbArn := range awsTargetGroup.LoadBalancerArns {
-				if lbArn == aws.ToString(loadBalancerArn) {
-					isAttachedToLB = true
-					break
-				}
-			}
-			if !isAttachedToLB {
+			if awsTargetGroup.TargetGroupArn == nil {
+				log.Warn("Target group ARN is nil for target group", svc1log.SafeParam("targetGroup", awsTargetGroup))
+				errorMessages = append(errorMessages, "Target group ARN is nil")
 				continue
 			}
 
@@ -297,13 +303,16 @@ func targetGroupForLoadBalancerV2(ctx context.Context, client *elasticloadbalanc
 }
 
 // targetsForTargetGroupV2 converts AWS TargetGroup to Fern Target
-func targetsForTargetGroupV2(ctx context.Context, client *elasticloadbalancingv2.Client, targetGroup types.TargetGroup) ([]*loadbalancerfern.Target, error) {
+func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targetGroup types.TargetGroup) ([]*loadbalancerfern.Target, error) {
 	var targets []*loadbalancerfern.Target
 	output, err := client.DescribeTargetHealth(ctx, &elasticloadbalancingv2.DescribeTargetHealthInput{
 		TargetGroupArn: targetGroup.TargetGroupArn,
 	})
 	if err != nil {
 		return targets, err
+	}
+	if output == nil {
+		return targets, fmt.Errorf("DescribeTargetHealth returned no response")
 	}
 
 	// Convert target type once for all targets in this group
@@ -314,37 +323,50 @@ func targetsForTargetGroupV2(ctx context.Context, client *elasticloadbalancingv2
 		return targets, fmt.Errorf("failed to convert target type: %w", err)
 	}
 	for _, targetHealth := range output.TargetHealthDescriptions {
+		if targetHealth.Target == nil || targetHealth.Target.Id == nil {
+			continue
+		}
 		var availabilityZone *string = nil
 		if targetHealth.Target.AvailabilityZone != nil {
 			availabilityZone = targetHealth.Target.AvailabilityZone
 		}
-		portValue := int(aws.ToInt32(targetHealth.Target.Port))
-		targets = append(targets, &loadbalancerfern.Target{
+		target := &loadbalancerfern.Target{
 			Id:               aws.ToString(targetHealth.Target.Id),
-			Port:             &portValue,
 			Type:             &targetType,
 			AvailabilityZone: availabilityZone,
-		})
+		}
+		if targetHealth.Target.Port != nil {
+			portValue := int(*targetHealth.Target.Port)
+			target.Port = &portValue
+		}
+		targets = append(targets, target)
 	}
 	return targets, nil
 }
 
-// certificatesForListenerV2 converts AWS Certificate to Fern Certificate
-func certificatesForListenerV2(certificates []types.Certificate) []*loadbalancerfern.Certificate {
+func certificatesForListenerV2(ctx context.Context, client elbv2ResourceAPI, listenerARN *string) ([]*loadbalancerfern.Certificate, []string) {
 	certs := []*loadbalancerfern.Certificate{}
-	for _, cert := range certificates {
-		var isDefault bool
-		if cert.IsDefault != nil {
-			isDefault = *cert.IsDefault
-		} else {
-			isDefault = false
+	var errors []string
+	paginator := elasticloadbalancingv2.NewDescribeListenerCertificatesPaginator(
+		client,
+		&elasticloadbalancingv2.DescribeListenerCertificatesInput{ListenerArn: listenerARN},
+	)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return certs, append(errors, err.Error())
 		}
-		certs = append(certs, &loadbalancerfern.Certificate{
-			Arn:       aws.ToString(cert.CertificateArn),
-			IsDefault: isDefault,
-		})
+		for _, cert := range page.Certificates {
+			if cert.CertificateArn == nil {
+				continue
+			}
+			certs = append(certs, &loadbalancerfern.Certificate{
+				Arn:       *cert.CertificateArn,
+				IsDefault: aws.ToBool(cert.IsDefault),
+			})
+		}
 	}
-	return certs
+	return certs, errors
 }
 
 // Resource discovery helper functions with deduplication

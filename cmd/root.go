@@ -90,15 +90,11 @@ func (a *MethodAws) setupCommonConfig(cmd *cobra.Command, outputFormat string, o
 			return err
 		}
 		a.AwsConfig = &awsConfig
-		if len(a.RootFlags.Regions) != 0 {
-			a.RootFlags.Regions, err = utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
-			if err != nil {
-				a.OutputSignal.Status = 1
-				a.OutputSignal.ErrorMessage = aws.String("No valid AWS regions specified")
-				return errors.New("no valid AWS regions specified")
-			}
-		} else {
-			a.RootFlags.Regions = utils.GetGeneralRegionsList()
+		a.RootFlags.Regions, err = utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
+		if err != nil {
+			a.OutputSignal.Status = 1
+			a.OutputSignal.ErrorMessage = aws.String("Unable to discover enabled AWS regions")
+			return err
 		}
 	} else {
 		a.RootFlags.Regions = utils.GetRegionsToCheck(cmd.Context(), a.RootFlags.Regions)

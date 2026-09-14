@@ -27,6 +27,9 @@ func extractDistributionStatus(enabled *bool) cloudfrontfern.CloudFrontDistribut
 }
 
 func transformDistributionToFern(ctx context.Context, awsConfig aws.Config, dist types.Distribution, accountID string) (*cloudfrontfern.CloudFrontDistribution, []string) {
+	if dist.ARN == nil {
+		return nil, []string{"Distribution ARN is nil"}
+	}
 	var errors []string
 	// Transform origins with enhanced details
 	var origins []*cloudfrontfern.CloudFrontDistributionOrigin
@@ -63,6 +66,9 @@ func transformDistributionToFern(ctx context.Context, awsConfig aws.Config, dist
 
 // Fallback transformation for when we only have DistributionSummary
 func transformDistributionSummaryToFern(ctx context.Context, awsConfig aws.Config, dist types.DistributionSummary, accountID string) (*cloudfrontfern.CloudFrontDistribution, []string) {
+	if dist.ARN == nil {
+		return nil, []string{"Distribution ARN is nil"}
+	}
 	var errors []string
 	// Transform origins (limited info from summary)
 	var origins []*cloudfrontfern.CloudFrontDistributionOrigin

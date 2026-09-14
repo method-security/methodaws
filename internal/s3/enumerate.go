@@ -11,6 +11,7 @@ import (
 	// Generated
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	s3fern "github.com/Method-Security/methodaws/generated/go/s3"
+	methodawsutils "github.com/Method-Security/methodaws/utils"
 
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -34,6 +35,9 @@ func bucketEncryption(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S
 			svc1log.SafeParam("bucketName", bucket.Identification.Name),
 			svc1log.Stacktrace(err))
 		return bucket, err
+	}
+	if result == nil {
+		return bucket, fmt.Errorf("GetBucketEncryption returned no response for bucket %s", bucket.Identification.Name)
 	}
 
 	if result.ServerSideEncryptionConfiguration != nil {
@@ -85,6 +89,9 @@ func objectVersioning(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S
 		errors = append(errors, err.Error())
 		return bucket, errors
 	}
+	if result == nil {
+		return bucket, append(errors, fmt.Sprintf("GetBucketVersioning returned no response for bucket %s", bucket.Identification.Name))
+	}
 
 	if result.Status != "" {
 		bucketVersioning, err := s3fern.NewBucketVersioningStatusFromString(strings.ToUpper(string(result.Status)))
@@ -120,7 +127,7 @@ func bucketPermissions(ctx context.Context, s3Client *s3.Client, bucket *s3fern.
 		log.Debug("Failed to get bucket policy (may not exist)",
 			svc1log.SafeParam("bucketName", bucket.Identification.Name))
 		// Policy may not exist, continue without it
-	} else {
+	} else if policyResult != nil {
 		bucket.Configuration.Policy = policyResult.Policy
 		policyDocument = policyResult.Policy
 	}
@@ -137,6 +144,9 @@ func bucketPermissions(ctx context.Context, s3Client *s3.Client, bucket *s3fern.
 			svc1log.Stacktrace(aclErr))
 		return bucket, aclErr
 	}
+	if aclResult == nil {
+		return bucket, fmt.Errorf("GetBucketAcl returned no response for bucket %s", bucket.Identification.Name)
+	}
 	grants = aclResult.Grants
 
 	// Get public access block configuration
@@ -149,7 +159,7 @@ func bucketPermissions(ctx context.Context, s3Client *s3.Client, bucket *s3fern.
 		log.Debug("Failed to get public access block configuration (may not exist)",
 			svc1log.SafeParam("bucketName", bucket.Identification.Name))
 		// Public access block may not exist, continue without it
-	} else {
+	} else if publicAccessResult != nil {
 		publicAccessBlock = publicAccessResult.PublicAccessBlockConfiguration
 	}
 
@@ -342,6 +352,10 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 		report.Errors = errors
 		return report
 	}
+	if listBucketsOutput == nil {
+		report.Errors = []string{"ListBuckets returned no response"}
+		return report
+	}
 
 	// Create a map of buckets by region for efficient processing
 	bucketsByRegion := make(map[string][]s3fern.S3Bucket)
@@ -349,6 +363,16 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 
 	// First pass: get all bucket regions and group them
 	for _, bucket := range listBucketsOutput.Buckets {
+		if bucket.Name == nil || *bucket.Name == "" {
+			errorMessages = append(errorMessages, "S3 bucket name is missing")
+			continue
+		}
+		ownerID := ""
+		ownerName := ""
+		if listBucketsOutput.Owner != nil {
+			ownerID = aws.ToString(listBucketsOutput.Owner.ID)
+			ownerName = aws.ToString(listBucketsOutput.Owner.DisplayName)
+		}
 		s3Bucket := s3fern.S3Bucket{
 			Identification: &s3fern.S3BucketIdentificationInfo{
 				Name: aws.ToString(bucket.Name),
@@ -356,8 +380,8 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			},
 			Configuration: &s3fern.S3BucketConfigurationInfo{
 				CreationDate: aws.ToTime(bucket.CreationDate),
-				OwnerId:      aws.ToString(listBucketsOutput.Owner.ID),
-				OwnerName:    aws.ToString(listBucketsOutput.Owner.DisplayName),
+				OwnerId:      ownerID,
+				OwnerName:    ownerName,
 			},
 		}
 
@@ -370,12 +394,12 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			errorMessages = append(errorMessages, fmt.Sprintf("Error getting location for bucket %s: %v", *bucket.Name, err))
 			continue
 		}
-
-		// If the region is empty, set it to us-east-1
-		region := string(regionOutput.LocationConstraint)
-		if region == "" {
-			region = "us-east-1"
+		if regionOutput == nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("GetBucketLocation returned no response for bucket %s", *bucket.Name))
+			continue
 		}
+
+		region := normalizeBucketRegion(regionOutput.LocationConstraint)
 		s3Bucket.Identification.Region = region
 
 		// Group buckets by region
@@ -434,12 +458,12 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 
 			bucketPtr.Identification.Url = fmt.Sprintf("https://%s.s3.%s.amazonaws.com", bucketPtr.Identification.Name, bucketPtr.Identification.Region)
 
-			bucketARN := arn.ARN{
-				Partition: "aws",
-				Service:   "s3",
-				Resource:  bucketPtr.Identification.Name,
+			bucketARN, err := methodawsutils.BuildGlobalARNForRegion(region, "s3", "", bucketPtr.Identification.Name)
+			if err != nil {
+				errorMessages = append(errorMessages, err.Error())
+				continue
 			}
-			bucketPtr.Identification.Arn = bucketARN.String()
+			bucketPtr.Identification.Arn = bucketARN
 
 			// Add resource discovery
 			bucketPtr.Resources = discoverS3Resources(bucketPtr)
@@ -452,6 +476,17 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	}
 	report.Errors = errorMessages
 	return report
+}
+
+func normalizeBucketRegion(location types.BucketLocationConstraint) string {
+	switch string(location) {
+	case "":
+		return "us-east-1"
+	case "EU":
+		return "eu-west-1"
+	default:
+		return string(location)
+	}
 }
 
 // Resource discovery functions with deduplication
@@ -482,7 +517,7 @@ func discoverIamRolesFromPolicy(policyDocument, region string) []*common.IamRole
 	iamMap := make(map[string]*common.IamRoleReference)
 
 	// Regex to match IAM role ARNs in policy documents
-	iamRoleArnRegex := regexp.MustCompile(`arn:aws:iam::([^:]+):role/([^\"'\\s]+)`)
+	iamRoleArnRegex := regexp.MustCompile(`arn:aws[a-z-]*:iam::([^:]+):role/([^\"'\\s]+)`)
 
 	matches := iamRoleArnRegex.FindAllStringSubmatch(policyDocument, -1)
 	for _, match := range matches {
@@ -512,7 +547,7 @@ func discoverLambdaFromPolicy(policyDocument, region string) []*common.LambdaRef
 	lambdaMap := make(map[string]*common.LambdaReference)
 
 	// Regex to match Lambda function ARNs in policy documents
-	lambdaArnRegex := regexp.MustCompile(`arn:aws:lambda:([^:]+):([^:]+):function:([^\"'\\s]+)`)
+	lambdaArnRegex := regexp.MustCompile(`arn:aws[a-z-]*:lambda:([^:]+):([^:]+):function:([^\"'\\s]+)`)
 
 	matches := lambdaArnRegex.FindAllStringSubmatch(policyDocument, -1)
 	for _, match := range matches {

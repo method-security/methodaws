@@ -125,8 +125,8 @@ func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsf
 	errors := []string{}
 
 	// Core Identity & Status (required field)
-	if instance.DBInstanceIdentifier == nil {
-		return nil, errors
+	if instance.DBInstanceIdentifier == nil || instance.DBInstanceArn == nil {
+		return nil, []string{"RDS DB instance identifier or ARN is missing"}
 	}
 	dbInstance := &rdsfern.RdsInstance{
 		Identification: &rdsfern.RdsIdentificationInfo{

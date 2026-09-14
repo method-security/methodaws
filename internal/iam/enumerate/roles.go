@@ -211,7 +211,7 @@ func discoverLambdaReferencesFromPolicies(policies []*iam.AttachedPolicy) []*com
 	lambdaMap := make(map[string]*common.LambdaReference)
 
 	// Regex to match Lambda function ARNs in policy documents
-	lambdaArnRegex := regexp.MustCompile(`arn:aws:lambda:([^:]+):([^:]+):function:([^"'\s]+)`)
+	lambdaArnRegex := regexp.MustCompile(`arn:aws[a-z-]*:lambda:([^:]+):([^:]+):function:([^"'\s]+)`)
 
 	for _, policy := range policies {
 		if policy.Configuration != nil && policy.Configuration.PolicyDocument != nil {
@@ -246,7 +246,7 @@ func discoverEc2ReferencesFromPolicies(policies []*iam.AttachedPolicy) []*common
 	ec2Map := make(map[string]*common.Ec2InstanceReference)
 
 	// Regex to match EC2 instance ARNs and instance IDs in policy documents
-	ec2ArnRegex := regexp.MustCompile(`arn:aws:ec2:([^:]+):([^:]+):instance/([^"'\s]+)`)
+	ec2ArnRegex := regexp.MustCompile(`arn:aws[a-z-]*:ec2:([^:]+):([^:]+):instance/([^"'\s]+)`)
 	ec2IdRegex := regexp.MustCompile(`"(i-[a-f0-9]{8,17})"`) // Instance ID pattern
 
 	for _, policy := range policies {
