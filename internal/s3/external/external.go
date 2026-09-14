@@ -102,8 +102,14 @@ func listBucketContents(ctx context.Context, client *s3.Client, bucketName strin
 			svc1log.Stacktrace(err))
 		return nil, fmt.Errorf("error listing bucket contents: %v", err)
 	}
+	if page == nil {
+		return nil, fmt.Errorf("listing bucket contents returned no response")
+	}
 
 	for _, object := range page.Contents {
+		if object.Key == nil {
+			continue
+		}
 		var size int
 		if object.Size != nil {
 			size = int(*object.Size)
@@ -277,7 +283,10 @@ func externalS3Region(ctx context.Context, bucketURL string, bucketName string, 
 	report := s3fern.ExternalS3BucketResult{}
 
 	// Construct ARN for the bucket
-	bucketARN := fmt.Sprintf("arn:aws:s3:::%s", bucketName)
+	bucketARN, err := utils.BuildGlobalARNForRegion(region, "s3", "", bucketName)
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
 
 	externalBucket := s3fern.ExternalBucket{
 		Identification: &s3fern.ExternalBucketIdentificationInfo{

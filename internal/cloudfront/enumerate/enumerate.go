@@ -3,6 +3,8 @@ package enumerate
 import (
 	// Standard
 	"context"
+	"fmt"
+
 	// Generated
 	cloudfrontfern "github.com/Method-Security/methodaws/generated/go/cloudfront"
 	// External
@@ -66,9 +68,9 @@ func enumerateCloudFrontDistributions(ctx context.Context, awsConfig aws.Config,
 
 	var cloudFrontDistributions []*cloudfrontfern.CloudFrontDistribution
 	for _, dist := range distributions {
-		if dist.ARN == nil {
-			log.Warn("Distribution ARN is nil for distribution", svc1log.SafeParam("distribution", dist))
-			errors = append(errors, "Distribution ARN is nil")
+		if dist.ARN == nil || dist.Id == nil {
+			log.Warn("Distribution identity is incomplete", svc1log.SafeParam("distribution", dist))
+			errors = append(errors, "Distribution ARN or ID is nil")
 			continue
 		}
 		distribution, errs := processDistribution(ctx, awsConfig, cloudfrontClient, dist, config.AccountId)
@@ -95,6 +97,9 @@ func processDistribution(ctx context.Context, awsConfig aws.Config, cloudfrontCl
 	if err != nil {
 		errors = append(errors, err.Error())
 		return nil, errors
+	}
+	if fullDistribution == nil || fullDistribution.ARN == nil {
+		return nil, []string{"GetDistribution returned an incomplete distribution"}
 	}
 
 	// Transform to Fern format
@@ -128,6 +133,9 @@ func getDistributionDetails(ctx context.Context, cloudfrontClient *cloudfront.Cl
 	result, err := cloudfrontClient.GetDistribution(ctx, input)
 	if err != nil {
 		return nil, err
+	}
+	if result == nil {
+		return nil, fmt.Errorf("GetDistribution returned no response")
 	}
 
 	return result.Distribution, nil

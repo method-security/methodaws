@@ -19,6 +19,7 @@ types:
   ScopeType:
     enum:
       - REGIONAL
+      - CLOUDFRONT
   StatementType:
     enum:
       - AND

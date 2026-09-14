@@ -47,6 +47,18 @@ func EnumerateWAF(ctx context.Context, awsConfig aws.Config, config waffern.WafE
 			svc1log.SafeParam("wafCount", len(wafs)))
 	}
 
+	cloudFrontConfig := awsConfig.Copy()
+	cloudFrontConfig.Region = "us-east-1"
+	cloudFrontWAFs, cloudFrontErrors := enumerateWAFForScope(
+		ctx,
+		wafv2.NewFromConfig(cloudFrontConfig),
+		"us-east-1",
+		types.ScopeCloudfront,
+		waffern.ScopeTypeCloudfront,
+	)
+	allErrors = append(allErrors, cloudFrontErrors...)
+	allWafs = append(allWafs, cloudFrontWAFs...)
+
 	// Set the results
 	if len(allWafs) > 0 {
 		report.Result.Wafs = allWafs
@@ -57,10 +69,30 @@ func EnumerateWAF(ctx context.Context, awsConfig aws.Config, config waffern.WafE
 
 // enumerateWAFForRegion enumerates WAFs for a given region
 func enumerateWAFForRegion(ctx context.Context, awsConfig aws.Config, region string) ([]*waffern.WafInstance, []string) {
-	log := svc1log.FromContext(ctx)
 	awsConfig.Region = region
+	return enumerateWAFForScope(
+		ctx,
+		wafv2.NewFromConfig(awsConfig),
+		region,
+		types.ScopeRegional,
+		waffern.ScopeTypeRegional,
+	)
+}
 
-	wafClient := wafv2.NewFromConfig(awsConfig)
+type wafAPI interface {
+	ListWebACLs(context.Context, *wafv2.ListWebACLsInput, ...func(*wafv2.Options)) (*wafv2.ListWebACLsOutput, error)
+	GetWebACL(context.Context, *wafv2.GetWebACLInput, ...func(*wafv2.Options)) (*wafv2.GetWebACLOutput, error)
+	ListResourcesForWebACL(context.Context, *wafv2.ListResourcesForWebACLInput, ...func(*wafv2.Options)) (*wafv2.ListResourcesForWebACLOutput, error)
+}
+
+func enumerateWAFForScope(
+	ctx context.Context,
+	wafClient wafAPI,
+	region string,
+	awsScope types.Scope,
+	fernScope waffern.ScopeType,
+) ([]*waffern.WafInstance, []string) {
+	log := svc1log.FromContext(ctx)
 	var errors []string
 
 	// List WAF WebACLs with pagination
@@ -68,7 +100,7 @@ func enumerateWAFForRegion(ctx context.Context, awsConfig aws.Config, region str
 	var nextMarker *string
 	for {
 		listWebACLsInput := &wafv2.ListWebACLsInput{
-			Scope:      types.ScopeRegional,
+			Scope:      awsScope,
 			NextMarker: nextMarker,
 		}
 		webACLsOutput, err := wafClient.ListWebACLs(ctx, listWebACLsInput)
@@ -76,6 +108,10 @@ func enumerateWAFForRegion(ctx context.Context, awsConfig aws.Config, region str
 			errorMsg := "Failed to list WAF WebACLs in region " + region + ": " + err.Error()
 			log.Error("Error listing WAF WebACLs", svc1log.SafeParam("error", err.Error()))
 			errors = append(errors, errorMsg)
+			break
+		}
+		if webACLsOutput == nil {
+			errors = append(errors, "ListWebACLs returned no response")
 			break
 		}
 		allWebACLs = append(allWebACLs, webACLsOutput.WebACLs...)
@@ -97,7 +133,7 @@ func enumerateWAFForRegion(ctx context.Context, awsConfig aws.Config, region str
 		}
 
 		// Get the rules for the WAF
-		rules, defaultAction, errs := getRules(ctx, wafClient, types.ScopeRegional, webACL.Id, webACL.Name)
+		rules, defaultAction, errs := getRules(ctx, wafClient, awsScope, webACL.Id, webACL.Name)
 		if len(errs) != 0 {
 			errors = append(errors, errs...)
 			continue
@@ -108,12 +144,13 @@ func enumerateWAFForRegion(ctx context.Context, awsConfig aws.Config, region str
 			Rules: rules,
 		}
 
-		// Add resource discovery from fronted resources
-		if lbRef := discoverLoadBalancerFromWebACL(ctx, wafClient, webACL.ARN, region); lbRef != nil {
-			resourceInfo.LoadBalancer = lbRef
-		}
-		if apiRef := discoverAPIGatewayFromWebACL(ctx, wafClient, webACL.ARN, region); apiRef != nil {
-			resourceInfo.ApiGateway = apiRef
+		if awsScope == types.ScopeRegional {
+			resourceArns, err := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
+			if err != nil {
+				errors = append(errors, err.Error())
+			} else {
+				resourceInfo.LoadBalancer, resourceInfo.ApiGateway = referencesFromResourceARNs(resourceArns, region)
+			}
 		}
 
 		waf := waffern.WafInstance{
@@ -123,7 +160,7 @@ func enumerateWAFForRegion(ctx context.Context, awsConfig aws.Config, region str
 				Region: region,
 			},
 			Configuration: &waffern.WafConfigurationInfo{
-				Scope:         waffern.ScopeTypeRegional,
+				Scope:         fernScope,
 				Description:   webACL.Description,
 				DefaultAction: defaultAction,
 			},
@@ -136,12 +173,15 @@ func enumerateWAFForRegion(ctx context.Context, awsConfig aws.Config, region str
 }
 
 // getRules gets the rules for a given WebACL
-func getRules(ctx context.Context, wafClient *wafv2.Client, scope types.Scope, webACLId, webACLName *string) ([]*waffern.RuleInfo, *waffern.ActionType, []string) {
+func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId, webACLName *string) ([]*waffern.RuleInfo, *waffern.ActionType, []string) {
 	log := svc1log.FromContext(ctx)
 	getWebACLInput := &wafv2.GetWebACLInput{Id: webACLId, Name: webACLName, Scope: scope}
 	webACLOutput, err := wafClient.GetWebACL(ctx, getWebACLInput)
 	if err != nil {
 		return nil, nil, []string{err.Error()}
+	}
+	if webACLOutput == nil || webACLOutput.WebACL == nil {
+		return nil, nil, []string{"GetWebACL returned no WebACL"}
 	}
 
 	// Default Action
@@ -277,85 +317,62 @@ func getStatementType(statement *types.Statement) waffern.StatementType {
 	}
 }
 
-// Resource discovery functions
-func discoverLoadBalancerFromWebACL(ctx context.Context, wafClient *wafv2.Client, webACLArn *string, region string) *common.LoadBalancerReference {
+func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string, region string) ([]string, error) {
 	log := svc1log.FromContext(ctx)
-	listResourcesInput := &wafv2.ListResourcesForWebACLInput{WebACLArn: webACLArn}
-	listResourcesOutput, err := wafClient.ListResourcesForWebACL(ctx, listResourcesInput)
-	if err != nil {
-		log.Warn("Failed to list resources for WebACL (LB discovery)",
-			svc1log.SafeParam("webACLArn", aws.ToString(webACLArn)),
-			svc1log.SafeParam("region", region),
-			svc1log.Stacktrace(err))
-		return nil
+	resourceTypes := []types.ResourceType{
+		types.ResourceTypeApplicationLoadBalancer,
+		types.ResourceTypeApiGateway,
 	}
-
-	for _, arn := range listResourcesOutput.ResourceArns {
-		if strings.Contains(arn, "elasticloadbalancing") && strings.Contains(arn, "loadbalancer/app") {
-			// Extract load balancer name from ARN
-			lbName := extractLoadBalancerNameFromArn(arn)
-			lbType := common.LoadBalancerTypeApplication
-
-			if lbName != "" {
-				dnsName := ""
-				return &common.LoadBalancerReference{
-					Arn:     arn,
-					DnsName: &dnsName,
-					Region:  region,
-					Type:    lbType,
-				}
-			}
+	var resourceARNs []string
+	for _, resourceType := range resourceTypes {
+		output, err := wafClient.ListResourcesForWebACL(ctx, &wafv2.ListResourcesForWebACLInput{
+			WebACLArn:    webACLArn,
+			ResourceType: resourceType,
+		})
+		if err != nil {
+			log.Warn("Failed to list resources for WebACL",
+				svc1log.SafeParam("webACLArn", aws.ToString(webACLArn)),
+				svc1log.SafeParam("resourceType", resourceType),
+				svc1log.SafeParam("region", region),
+				svc1log.Stacktrace(err))
+			return resourceARNs, err
+		}
+		if output != nil {
+			resourceARNs = append(resourceARNs, output.ResourceArns...)
 		}
 	}
-	return nil
+	return resourceARNs, nil
 }
 
-// discoverAPIGatewayFromWebACL discovers the API Gateway from the WebACL
-func discoverAPIGatewayFromWebACL(ctx context.Context, wafClient *wafv2.Client, webACLArn *string, region string) *common.ApiGatewayReference {
-	log := svc1log.FromContext(ctx)
-	listResourcesInput := &wafv2.ListResourcesForWebACLInput{WebACLArn: webACLArn}
-	listResourcesOutput, err := wafClient.ListResourcesForWebACL(ctx, listResourcesInput)
-	if err != nil {
-		log.Warn("Failed to list resources for WebACL (API GW discovery)",
-			svc1log.SafeParam("webACLArn", aws.ToString(webACLArn)),
-			svc1log.SafeParam("region", region),
-			svc1log.Stacktrace(err))
-		return nil
-	}
-
-	for _, arn := range listResourcesOutput.ResourceArns {
-		if strings.Contains(arn, "apigateway") && strings.Contains(arn, "/restapis/") {
-			// Extract API Gateway ID from ARN
-			apiID := extractAPIGatewayIDFromArn(arn)
-
+func referencesFromResourceARNs(resourceARNs []string, region string) (*common.LoadBalancerReference, *common.ApiGatewayReference) {
+	var loadBalancer *common.LoadBalancerReference
+	var apiGateway *common.ApiGatewayReference
+	for _, resourceARN := range resourceARNs {
+		if loadBalancer == nil && strings.Contains(resourceARN, ":elasticloadbalancing:") &&
+			strings.Contains(resourceARN, ":loadbalancer/app/") {
+			loadBalancer = &common.LoadBalancerReference{
+				Arn:    resourceARN,
+				Region: region,
+				Type:   common.LoadBalancerTypeApplication,
+			}
+		}
+		if apiGateway == nil && strings.Contains(resourceARN, ":apigateway:") && strings.Contains(resourceARN, "/restapis/") {
+			apiID := extractAPIGatewayIDFromArn(resourceARN)
 			if apiID != "" {
-				return &common.ApiGatewayReference{
-					Arn:    arn,
-					ApiId:  &apiID,
-					Region: region,
-					Name:   nil,
-				}
+				apiGateway = &common.ApiGatewayReference{Arn: resourceARN, ApiId: &apiID, Region: region}
 			}
 		}
 	}
-	return nil
-}
-
-// Helper functions to extract resource identifiers from ARNs
-func extractLoadBalancerNameFromArn(arn string) string {
-	// Format: arn:aws:elasticloadbalancing:region:account:loadbalancer/app/name/id
-	parts := strings.Split(arn, "/")
-	if len(parts) >= 3 && parts[1] == "app" {
-		return parts[2]
-	}
-	return ""
+	return loadBalancer, apiGateway
 }
 
 func extractAPIGatewayIDFromArn(arn string) string {
 	// Format: arn:aws:apigateway:region::/restapis/api-id
 	parts := strings.Split(arn, "/")
-	if len(parts) >= 2 && parts[len(parts)-2] == "restapis" {
-		return parts[len(parts)-1]
+	for index, part := range parts {
+		if part == "restapis" && index+1 < len(parts) {
+			return parts[index+1]
+		}
 	}
 	return ""
 }

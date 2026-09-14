@@ -60,6 +60,10 @@ func enumerateV1ApiGatewaysForRegion(ctx context.Context, cfg aws.Config, region
 			errors = append(errors, fmt.Sprintf("GetRestApis pagination failed in region %s: %s", region, err.Error()))
 			break
 		}
+		if result == nil {
+			errors = append(errors, fmt.Sprintf("GetRestApis returned no response in region %s", region))
+			break
+		}
 
 		// Process APIs sequentially
 		for _, api := range result.Items {
@@ -76,6 +80,10 @@ func enumerateV1ApiGatewaysForRegion(ctx context.Context, cfg aws.Config, region
 					svc1log.SafeParam("apiId", *api.Id),
 					svc1log.Stacktrace(err))
 				errors = append(errors, fmt.Sprintf("GetStages failed for API %s: %s", *api.Id, err.Error()))
+				continue
+			}
+			if stages == nil {
+				errors = append(errors, fmt.Sprintf("GetStages returned no response for API %s", *api.Id))
 				continue
 			}
 
@@ -214,6 +222,10 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 	}
 
 	for _, resource := range allResources {
+		if resource.Id == nil || resource.Path == nil {
+			errors = append(errors, fmt.Sprintf("Resource ID or path is missing for API %s", apiID))
+			continue
+		}
 		for methodName := range resource.ResourceMethods {
 			method, err := client.GetMethod(ctx, &apigateway.GetMethodInput{
 				RestApiId:  &apiID,
@@ -234,6 +246,10 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 					svc1log.Stacktrace(err))
 				errors = append(errors, fmt.Sprintf("GetMethod failed for API %s, resource %s (%s), method %s: %s",
 					apiID, resourcePath, *resource.Id, methodName, err.Error()))
+				continue
+			}
+			if method == nil {
+				errors = append(errors, fmt.Sprintf("GetMethod returned no response for API %s, resource %s", apiID, *resource.Id))
 				continue
 			}
 

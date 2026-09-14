@@ -41,8 +41,11 @@ func listHostedZones(ctx context.Context, route53Client *route53.Client) ([]rout
 		log.Info("Retrieved hosted zones page", svc1log.SafeParam("zoneCount", len(page.HostedZones)))
 
 		for _, hostedZone := range page.HostedZones {
+			if hostedZone.CallerReference == nil || hostedZone.Id == nil || hostedZone.Name == nil {
+				errors = append(errors, "Route53 hosted zone identity is incomplete")
+				continue
+			}
 			// Prepare identification info
-			// These always exist
 			identification := &route53fern.HostedZoneIdentificationInfo{
 				CallerReference: *hostedZone.CallerReference,
 				Id:              *hostedZone.Id,
@@ -144,6 +147,10 @@ func listDNSRecords(ctx context.Context, route53Client *route53.Client, zoneID s
 			svc1log.SafeParam("recordCount", len(page.ResourceRecordSets)))
 
 		for _, recordSet := range page.ResourceRecordSets {
+			if recordSet.Name == nil {
+				errors = append(errors, fmt.Sprintf("DNS record name is missing in zone %s", zoneID))
+				continue
+			}
 			// Convert AWS SDK ResourceRecordSet to fern ResourceRecordSet
 			fernRecord := &route53fern.ResourceRecordSet{
 				Name: *recordSet.Name,
@@ -151,7 +158,7 @@ func listDNSRecords(ctx context.Context, route53Client *route53.Client, zoneID s
 			}
 
 			// Handle optional fields
-			if recordSet.AliasTarget != nil {
+			if recordSet.AliasTarget != nil && recordSet.AliasTarget.DNSName != nil && recordSet.AliasTarget.HostedZoneId != nil {
 				aliasTarget := &route53fern.AliasTarget{
 					DnsName:              *recordSet.AliasTarget.DNSName,
 					HostedZoneId:         *recordSet.AliasTarget.HostedZoneId,
@@ -160,7 +167,8 @@ func listDNSRecords(ctx context.Context, route53Client *route53.Client, zoneID s
 				fernRecord.AliasTarget = aliasTarget
 			}
 
-			if recordSet.CidrRoutingConfig != nil {
+			if recordSet.CidrRoutingConfig != nil && recordSet.CidrRoutingConfig.CollectionId != nil &&
+				recordSet.CidrRoutingConfig.LocationName != nil {
 				cidrRouting := &route53fern.CidrRouting{
 					CollectionId: *recordSet.CidrRoutingConfig.CollectionId,
 					LocationName: *recordSet.CidrRoutingConfig.LocationName,
@@ -198,6 +206,9 @@ func listDNSRecords(ctx context.Context, route53Client *route53.Client, zoneID s
 			if recordSet.ResourceRecords != nil {
 				var resourceRecords []*route53fern.ResourceRecord
 				for _, rr := range recordSet.ResourceRecords {
+					if rr.Value == nil {
+						continue
+					}
 					resourceRecord := &route53fern.ResourceRecord{
 						Value: *rr.Value,
 					}

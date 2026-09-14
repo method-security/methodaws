@@ -125,17 +125,30 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*loadbalancerfern.Target, []string) {
 	targets := []*loadbalancerfern.Target{}
 	errorMessages := []string{}
+	var instancePort *int
+	ports := make(map[int]struct{})
+	for _, description := range loadBalancer.ListenerDescriptions {
+		if description.Listener != nil && description.Listener.InstancePort != nil {
+			ports[int(*description.Listener.InstancePort)] = struct{}{}
+		}
+	}
+	if len(ports) == 1 {
+		for port := range ports {
+			portValue := port
+			instancePort = &portValue
+		}
+	}
 
 	for _, instance := range loadBalancer.Instances {
+		if instance.InstanceId == nil {
+			errorMessages = append(errorMessages, "Classic load balancer instance ID is nil")
+			continue
+		}
 		targetType := loadbalancerfern.TargetTypeInstance
 		target := &loadbalancerfern.Target{
-			Id:   aws.ToString(instance.InstanceId),
+			Id:   *instance.InstanceId,
+			Port: instancePort,
 			Type: &targetType,
-		}
-		// Use the listener instance port if available from the load balancer's listener descriptions
-		if len(loadBalancer.ListenerDescriptions) > 0 && loadBalancer.ListenerDescriptions[0].Listener != nil && loadBalancer.ListenerDescriptions[0].Listener.InstancePort != nil {
-			portValue := int(*loadBalancer.ListenerDescriptions[0].Listener.InstancePort)
-			target.Port = &portValue
 		}
 		targets = append(targets, target)
 	}
@@ -148,10 +161,12 @@ func listenersForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*
 	errorMessages := []string{}
 
 	for _, listener := range loadBalancer.ListenerDescriptions {
-		port := int(listener.Listener.LoadBalancerPort)
-		fernListener := &loadbalancerfern.Listener{
-			Port: &port,
+		if listener.Listener == nil {
+			errorMessages = append(errorMessages, "Classic load balancer listener is nil")
+			continue
 		}
+		port := int(listener.Listener.LoadBalancerPort)
+		fernListener := &loadbalancerfern.Listener{Port: &port}
 
 		// Convert protocol
 		if listener.Listener.Protocol != nil {

@@ -193,20 +193,21 @@ func enumerateRDSSecurityGroupForRegion(ctx context.Context, cfg aws.Config, reg
 func convertAWSEC2SecurityGroupToFern(ctx context.Context, cfg aws.Config, awsSG ec2types.SecurityGroup, region string) (*fernsecuritygroup.SecurityGroup, []string) {
 	log := svc1log.FromContext(ctx)
 	var errors []string
+	if awsSG.GroupId == nil {
+		return nil, []string{"EC2 security group ID is missing"}
+	}
 
 	// Fetch detailed security group rules to get rule IDs
 	var detailedRules []ec2types.SecurityGroupRule
-	if awsSG.GroupId != nil {
-		cfg.Region = region
-		rules, err := fetchSecurityGroupRules(ctx, cfg, *awsSG.GroupId)
-		if err != nil {
-			log.Warn("Failed to fetch detailed security group rules",
-				svc1log.SafeParam("groupId", *awsSG.GroupId),
-				svc1log.SafeParam("region", region),
-				svc1log.Stacktrace(err))
-		} else {
-			detailedRules = rules
-		}
+	cfg.Region = region
+	rules, err := fetchSecurityGroupRules(ctx, cfg, *awsSG.GroupId)
+	if err != nil {
+		log.Warn("Failed to fetch detailed security group rules",
+			svc1log.SafeParam("groupId", *awsSG.GroupId),
+			svc1log.SafeParam("region", region),
+			svc1log.Stacktrace(err))
+	} else {
+		detailedRules = rules
 	}
 
 	// Convert SecurityGroupRules directly to fernsecuritygroup.IpPermission

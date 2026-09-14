@@ -65,6 +65,10 @@ func enumerateV2ApiGatewaysForRegion(ctx context.Context, cfg aws.Config, region
 			errors = append(errors, fmt.Sprintf("Failed to retrieve HTTP APIs in region %s: %s", region, err.Error()))
 			break
 		}
+		if result == nil {
+			errors = append(errors, fmt.Sprintf("GetApis returned no response in region %s", region))
+			break
+		}
 
 		// Process APIs sequentially
 		for _, api := range result.Items {
@@ -134,15 +138,13 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	errors = append(errors, errs...)
 
 	// Get stages for this API
-	stages, err := client.GetStages(ctx, &apigatewayv2.GetStagesInput{
-		ApiId: api.ApiId,
-	})
+	stages, err := getAllHTTPAPIStages(ctx, client, *api.ApiId)
 	var primaryStageName *string
 	if err != nil {
 		errors = append(errors, err.Error())
-	} else if len(stages.Items) > 0 {
+	} else if len(stages) > 0 {
 		// Use the first non-$default stage found
-		for _, stage := range stages.Items {
+		for _, stage := range stages {
 			if stage.StageName != nil && *stage.StageName != "$default" {
 				primaryStageName = stage.StageName
 				break
@@ -213,6 +215,10 @@ func getHTTPAPIRoutes(ctx context.Context, client *apigatewayv2.Client, apiID, r
 			errors = append(errors, fmt.Sprintf("GetRoutes failed for API %s: %s", apiID, err.Error()))
 			break
 		}
+		if routesResult == nil {
+			errors = append(errors, fmt.Sprintf("GetRoutes returned no response for API %s", apiID))
+			break
+		}
 		allRoutes = append(allRoutes, routesResult.Items...)
 		if routesResult.NextToken == nil {
 			break
@@ -221,6 +227,10 @@ func getHTTPAPIRoutes(ctx context.Context, client *apigatewayv2.Client, apiID, r
 	}
 
 	for _, route := range allRoutes {
+		if route.RouteKey == nil {
+			errors = append(errors, fmt.Sprintf("Route key is missing for API %s", apiID))
+			continue
+		}
 		// Get integration for this route if it exists
 		var integration *apigatewayfern.Integration
 		if route.Target != nil {
@@ -233,6 +243,8 @@ func getHTTPAPIRoutes(ctx context.Context, client *apigatewayv2.Client, apiID, r
 				})
 				if err != nil {
 					errors = append(errors, err.Error())
+				} else if integrationResult == nil {
+					errors = append(errors, fmt.Sprintf("GetIntegration returned no response for API %s", apiID))
 				} else {
 					integ, err := convertV2Integration(integrationResult, region)
 					if err != nil {
@@ -416,35 +428,25 @@ func getHTTPAPICertificates(ctx context.Context, client *apigatewayv2.Client, ap
 	var certificates []*apigatewayfern.Certificate
 	var errors []string
 
-	// Get domain names for this API with pagination
-	var allDomains []types.DomainName
-	var domainNextToken *string
-	for {
-		domainResult, err := client.GetDomainNames(ctx, &apigatewayv2.GetDomainNamesInput{
-			NextToken: domainNextToken,
-		})
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("GetDomainNames failed: %s", err.Error()))
-			break
-		}
-		allDomains = append(allDomains, domainResult.Items...)
-		if domainResult.NextToken == nil {
-			break
-		}
-		domainNextToken = domainResult.NextToken
+	allDomains, err := getAllHTTPAPIDomainNames(ctx, client)
+	if err != nil {
+		return certificates, []string{err.Error()}
 	}
 
 	for _, domain := range allDomains {
+		if domain.DomainName == nil {
+			errors = append(errors, "API Gateway domain name is missing")
+			continue
+		}
 		// Check if this domain is associated with our API
-		mappings, err := client.GetApiMappings(ctx, &apigatewayv2.GetApiMappingsInput{
-			DomainName: domain.DomainName,
-		})
+		mappings, err := getAllHTTPAPIMappings(ctx, client, *domain.DomainName)
 		if err != nil {
+			errors = append(errors, err.Error())
 			continue
 		}
 
 		// Check if any mapping is for our API
-		for _, mapping := range mappings.Items {
+		for _, mapping := range mappings {
 			if mapping.ApiId != nil && *mapping.ApiId == apiID {
 				if len(domain.DomainNameConfigurations) == 0 || domain.DomainNameConfigurations[0].CertificateArn == nil {
 					errors = append(errors, fmt.Sprintf("Domain %s has no certificate configuration", aws.ToString(domain.DomainName)))
@@ -479,16 +481,13 @@ func getHTTPAPICertificates(ctx context.Context, client *apigatewayv2.Client, ap
 
 // getHTTPAPIAccessLogSettings retrieves access log configuration
 func getHTTPAPIAccessLogSettings(ctx context.Context, client *apigatewayv2.Client, apiID string) (*apigatewayfern.AccessLogSettings, error) {
-	// Get stages for this API to find access log settings
-	stages, err := client.GetStages(ctx, &apigatewayv2.GetStagesInput{
-		ApiId: &apiID,
-	})
+	stages, err := getAllHTTPAPIStages(ctx, client, apiID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Look for access log settings in any stage (typically $default)
-	for _, stage := range stages.Items {
+	for _, stage := range stages {
 		if stage.AccessLogSettings != nil && stage.AccessLogSettings.DestinationArn != nil {
 			return &apigatewayfern.AccessLogSettings{
 				DestinationArn: *stage.AccessLogSettings.DestinationArn,
@@ -498,4 +497,76 @@ func getHTTPAPIAccessLogSettings(ctx context.Context, client *apigatewayv2.Clien
 	}
 
 	return nil, nil
+}
+
+type getStagesAPI interface {
+	GetStages(context.Context, *apigatewayv2.GetStagesInput, ...func(*apigatewayv2.Options)) (*apigatewayv2.GetStagesOutput, error)
+}
+
+func getAllHTTPAPIStages(ctx context.Context, client getStagesAPI, apiID string) ([]types.Stage, error) {
+	var stages []types.Stage
+	var nextToken *string
+	for {
+		output, err := client.GetStages(ctx, &apigatewayv2.GetStagesInput{ApiId: &apiID, NextToken: nextToken})
+		if err != nil {
+			return stages, fmt.Errorf("GetStages failed for API %s: %w", apiID, err)
+		}
+		if output == nil {
+			return stages, fmt.Errorf("GetStages returned no response for API %s", apiID)
+		}
+		stages = append(stages, output.Items...)
+		if output.NextToken == nil {
+			return stages, nil
+		}
+		nextToken = output.NextToken
+	}
+}
+
+type getDomainNamesAPI interface {
+	GetDomainNames(context.Context, *apigatewayv2.GetDomainNamesInput, ...func(*apigatewayv2.Options)) (*apigatewayv2.GetDomainNamesOutput, error)
+}
+
+func getAllHTTPAPIDomainNames(ctx context.Context, client getDomainNamesAPI) ([]types.DomainName, error) {
+	var domains []types.DomainName
+	var nextToken *string
+	for {
+		output, err := client.GetDomainNames(ctx, &apigatewayv2.GetDomainNamesInput{NextToken: nextToken})
+		if err != nil {
+			return domains, fmt.Errorf("GetDomainNames failed: %w", err)
+		}
+		if output == nil {
+			return domains, fmt.Errorf("GetDomainNames returned no response")
+		}
+		domains = append(domains, output.Items...)
+		if output.NextToken == nil {
+			return domains, nil
+		}
+		nextToken = output.NextToken
+	}
+}
+
+type getAPIMappingsAPI interface {
+	GetApiMappings(context.Context, *apigatewayv2.GetApiMappingsInput, ...func(*apigatewayv2.Options)) (*apigatewayv2.GetApiMappingsOutput, error)
+}
+
+func getAllHTTPAPIMappings(ctx context.Context, client getAPIMappingsAPI, domainName string) ([]types.ApiMapping, error) {
+	var mappings []types.ApiMapping
+	var nextToken *string
+	for {
+		output, err := client.GetApiMappings(ctx, &apigatewayv2.GetApiMappingsInput{
+			DomainName: &domainName,
+			NextToken:  nextToken,
+		})
+		if err != nil {
+			return mappings, fmt.Errorf("GetApiMappings failed for domain %s: %w", domainName, err)
+		}
+		if output == nil {
+			return mappings, fmt.Errorf("GetApiMappings returned no response for domain %s", domainName)
+		}
+		mappings = append(mappings, output.Items...)
+		if output.NextToken == nil {
+			return mappings, nil
+		}
+		nextToken = output.NextToken
+	}
 }
