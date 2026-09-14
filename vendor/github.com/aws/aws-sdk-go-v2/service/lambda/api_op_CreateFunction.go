@@ -247,8 +247,11 @@ type CreateFunctionInput struct {
 	TenancyConfig *types.TenancyConfig
 
 	// The amount of time (in seconds) that Lambda allows a function to run before
-	// stopping it. The default is 3 seconds. The maximum allowed value is 900 seconds.
-	// For more information, see [Lambda execution environment].
+	// stopping it. The default is 3 seconds, and the maximum allowed value is 900
+	// seconds. For functions using Lambda Managed Instances, asynchronous invocations
+	// and event source mapping invocations (except Amazon MQ and Amazon DocumentDB)
+	// support a maximum allowed value of 5,400 seconds (90 minutes). For more
+	// information, see [Lambda execution environment].
 	//
 	// [Lambda execution environment]: https://docs.aws.amazon.com/lambda/latest/dg/runtimes-context.html
 	Timeout *int32
@@ -311,9 +314,9 @@ type CreateFunctionOutput struct {
 	// [Configuring ephemeral storage (console)]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-function-common.html#configuration-ephemeral-storage
 	EphemeralStorage *types.EphemeralStorage
 
-	// Connection settings for an [Amazon EFS file system] or an [Amazon S3 Files file system].
+	// Connection settings for an [Amazon EFS file system] or an [Amazon S3 file system].
 	//
-	// [Amazon S3 Files file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
+	// [Amazon S3 file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
 	// [Amazon EFS file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
 	FileSystemConfigs []types.FileSystemConfig
 
@@ -469,9 +472,6 @@ func (c *Client) addOperationCreateFunctionMiddlewares(stack *middleware.Stack, 
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

@@ -1,3 +1,47 @@
+# v1.108.0 (2026-09-09)
+
+* **Feature**: Stop registering the `retry.MetricsHeader` middleware in generated clients. The `Amz-Sdk-Request` header is now set by the retry middleware itself.
+* **Feature**: Updates documentation for lambda function timeout.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.107.0 (2026-09-04)
+
+* **Feature**: Stop registering the `spanRetryLoop` middleware in generated clients. The retry loop's tracing span is now opened by the retry middleware itself.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.106.0 (2026-09-01)
+
+* **Feature**: AWS Lambda now provides configurable control over S3 direct access, allowing you to explicitly enable or disable how functions stream file reads directly from S3 buckets. This gives you flexibility to tune data access behavior based on your workload requirements, independent of memory size.
+
+# v1.105.0 (2026-08-31.2)
+
+* **Feature**: Stop registering the `SetCredentialSourceMiddleware` middleware in generated clients. Credential source user agent features are now set when the client's middleware stack is constructed.
+
+# v1.104.1 (2026-08-28)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.104.0 (2026-08-27)
+
+* **Feature**: Support connection read timeouts in the SDK. This is currently available on an opt-in basis by setting env `AWS_ENABLE_DEFAULT_SOCKET_TIMEOUT_2026=true`.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.103.0 (2026-08-26)
+
+* **Feature**: Stop registering the `ComputeContentLength` middleware in generated clients. `Content-Length` is now set when the request body is set via `SetStream`.
+* **Dependency Update**: Update to smithy-go v1.28.0.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.102.1 (2026-08-25)
+
+* **Dependency Update**: Update to smithy-go v1.27.10.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.102.0 (2026-08-20)
+
+* **Feature**: Adds support for full JSON resource-based policies, enabling customers to create, retrieve, update, and delete function resource policies as complete JSON documents.
+* **Dependency Update**: Updated to the latest SDK module versions
+
 # v1.101.4 (2026-08-14)
 
 * **Dependency Update**: Update to smithy-go v1.27.8.

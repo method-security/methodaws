@@ -1241,9 +1241,9 @@ type ExecutionTimedOutDetails struct {
 	noSmithyDocumentSerde
 }
 
-// Details about the connection between a Lambda function and an [Amazon EFS file system] or an [Amazon S3 Files file system].
+// Details about the connection between a Lambda function and an [Amazon EFS file system] or an [Amazon S3 file system].
 //
-// [Amazon S3 Files file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
+// [Amazon S3 file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
 // [Amazon EFS file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
 type FileSystemConfig struct {
 
@@ -1257,6 +1257,12 @@ type FileSystemConfig struct {
 	//
 	// This member is required.
 	LocalMountPath *string
+
+	// The configuration for how your function accesses data on an Amazon S3 file
+	// system. Valid only when the file system access point ARN is an Amazon S3 Files
+	// access point. If you specify a different access point type (for example, Amazon
+	// Elastic File System), the operation returns an InvalidParameterException .
+	S3FilesConfig *S3FilesConfig
 
 	noSmithyDocumentSerde
 }
@@ -1428,9 +1434,9 @@ type FunctionConfiguration struct {
 	// [Configuring ephemeral storage (console)]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-function-common.html#configuration-ephemeral-storage
 	EphemeralStorage *EphemeralStorage
 
-	// Connection settings for an [Amazon EFS file system] or an [Amazon S3 Files file system].
+	// Connection settings for an [Amazon EFS file system] or an [Amazon S3 file system].
 	//
-	// [Amazon S3 Files file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
+	// [Amazon S3 file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
 	// [Amazon EFS file system]: https://docs.aws.amazon.com/lambda/latest/dg/configuration-filesystem.html
 	FileSystemConfigs []FileSystemConfig
 
@@ -2314,9 +2320,9 @@ type ProvisionedConcurrencyConfigListItem struct {
 type ProvisionedPollerConfig struct {
 
 	// The maximum number of event pollers this event source can scale up to. For
-	// Amazon SQS events source mappings, default is 200, and minimum value allowed is
-	// 2. For Amazon MSK and self-managed Apache Kafka event source mappings, default
-	// is 200, and minimum value allowed is 1.
+	// Amazon SQS event source mappings, the accepted range is between 2 and 10,000,
+	// with a default of 200. For Amazon MSK and self-managed Apache Kafka event source
+	// mappings, the accepted range is between 1 and 2,000, with a default of 200.
 	MaximumPollers *int32
 
 	// The minimum number of event pollers this event source can scale down to. For
@@ -2385,6 +2391,30 @@ type RuntimeVersionError struct {
 
 	// The error message.
 	Message *string
+
+	noSmithyDocumentSerde
+}
+
+// Setting controls how your function accesses data from an Amazon S3 file system.
+type S3FilesConfig struct {
+
+	// Specifies if a function reads from the file system for the lowest latency, or
+	// through Amazon S3 Files feature "direct Amazon S3 bucket reads" for the highest
+	// throughput. Valid values:
+	//
+	//   - AUTO (default) – Direct reads are active for functions you configure with
+	//   512 MB or more of memory.
+	//
+	//   - ENABLED – Enforces all reads are directly from the Amazon S3 bucket,
+	//   regardless of available memory (less than 512 MB).
+	//
+	//   - DISABLED – Routes all reads through the file system, regardless of memory
+	//   configuration.
+	//
+	// To use direct reads, you must grant the execution role the s3:GetObject and
+	// s3:GetObjectVersion permissions. If a direct read fails, Lambda automatically
+	// falls back to reading through the file system.
+	DirectS3Read DirectS3Read
 
 	noSmithyDocumentSerde
 }
