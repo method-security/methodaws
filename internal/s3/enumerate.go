@@ -39,22 +39,39 @@ func bucketEncryption(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S
 	if result.ServerSideEncryptionConfiguration != nil {
 		encryptionRules := []*s3fern.EncryptionRule{}
 		for _, rule := range result.ServerSideEncryptionConfiguration.Rules {
+			if rule.ApplyServerSideEncryptionByDefault == nil {
+				continue
+			}
 			encryptionRule := s3fern.EncryptionRule{}
 			sseAlgorithm, _ := s3fern.NewS3ServerSideEncryptionFromString(string(rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm))
 			encryptionRule.SseAlgorithm = &sseAlgorithm
 			if rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID != nil {
-				keyID := *rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID
-				encryptionRule.KmsKey = &common.KmsKeyReference{
-					KeyId:  keyID,
-					Arn:    keyID, // Use keyID as ARN for now, could be enhanced
-					Region: bucket.Identification.Region,
-				}
+				encryptionRule.KmsKey = kmsKeyReference(*rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID)
 			}
 			encryptionRules = append(encryptionRules, &encryptionRule)
 		}
 		bucket.Configuration.EncryptionRules = encryptionRules
 	}
 	return bucket, nil
+}
+
+func kmsKeyReference(value string) *common.KmsKeyReference {
+	keyARN, err := arn.Parse(value)
+	if err != nil || keyARN.Partition == "" || keyARN.Service != "kms" || keyARN.Region == "" ||
+		keyARN.AccountID == "" || !strings.HasPrefix(keyARN.Resource, "key/") {
+		return nil
+	}
+
+	keyID := strings.TrimPrefix(keyARN.Resource, "key/")
+	if keyID == "" {
+		return nil
+	}
+
+	return &common.KmsKeyReference{
+		Arn:    keyARN.String(),
+		KeyId:  keyID,
+		Region: keyARN.Region,
+	}
 }
 
 func objectVersioning(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S3Bucket) (*s3fern.S3Bucket, []string) {
