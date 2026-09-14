@@ -34,12 +34,6 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 		name = extractNameFromTags(awsInstance.Tags)
 	}
 
-	// Convert IAM instance profile to IAM role reference
-	var iamRole *common.IamRoleReference
-	if awsInstance.IamInstanceProfile != nil {
-		iamRole = convertIamInstanceProfileToRoleReference(awsInstance.IamInstanceProfile, region)
-	}
-
 	// Convert network interfaces
 	var networkInterfaces []*ec2.InstanceNetworkInterface
 	if len(awsInstance.NetworkInterfaces) > 0 {
@@ -51,6 +45,7 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 	if len(awsInstance.SecurityGroups) > 0 {
 		securityGroupIds = extractSecurityGroupIds(awsInstance.SecurityGroups)
 	}
+	// EC2 exposes an instance profile, not the IAM role attached to that profile, so no role is inferred here.
 
 	// Create DNS data
 	var dnsData *ec2.DnsData
@@ -86,7 +81,6 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 		},
 		Resources: &ec2.Ec2InstanceResourceInfo{
 			NetworkInterfaces: networkInterfaces,
-			IamRole:           iamRole,
 			SecurityGroupIds:  securityGroupIds,
 			Dns:               dnsData,
 		},
@@ -140,30 +134,6 @@ func convertPlatform(platform types.PlatformValues) *ec2.PlatformValues {
 	platformStr := strings.ToUpper(string(platform))
 	fernPlatform := ec2.PlatformValues(platformStr)
 	return &fernPlatform
-}
-
-// convertIamInstanceProfileToRoleReference converts AWS IAM instance profile to common.IamRoleReference
-func convertIamInstanceProfileToRoleReference(profile *types.IamInstanceProfile, region string) *common.IamRoleReference {
-	if profile == nil || profile.Arn == nil {
-		return nil
-	}
-
-	// Extract role name from ARN if possible
-	var roleName *string
-	if profile.Arn != nil {
-		// ARN format: arn:aws:iam::account:instance-profile/role-name
-		parts := strings.Split(*profile.Arn, "/")
-		if len(parts) > 1 {
-			name := parts[len(parts)-1]
-			roleName = &name
-		}
-	}
-
-	return &common.IamRoleReference{
-		Arn:      *profile.Arn,
-		RoleName: roleName,
-		Region:   region,
-	}
 }
 
 // convertPlacement converts AWS placement to Fern format
@@ -233,7 +203,6 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 		fernNI := &ec2.InstanceNetworkInterface{
 			Identification: &ec2.InstanceNetworkInterfaceIdentificationInfo{
 				Id:     *ni.NetworkInterfaceId,
-				Arn:    ni.NetworkInterfaceId, // Using the ID as placeholder for ARN
 				Region: region,
 			},
 			Configuration: &ec2.InstanceNetworkInterfaceConfigurationInfo{

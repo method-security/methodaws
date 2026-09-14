@@ -10,6 +10,7 @@ import (
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	ec2 "github.com/Method-Security/methodaws/generated/go/ec2"
 	eksfern "github.com/Method-Security/methodaws/generated/go/eks"
+	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	eksTypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
@@ -914,16 +915,18 @@ func createKmsKeyReference(keyArn, region string) *common.KmsKeyReference {
 }
 
 // createCloudWatchLogReference creates a CloudWatch log reference from log group name
-func createCloudWatchLogReference(logGroupName, region string) *common.CloudWatchLogReference {
-	if logGroupName == "" {
+func createCloudWatchLogReference(logGroupName, clusterARN, region string) *common.CloudWatchLogReference {
+	if logGroupName == "" || clusterARN == "" {
 		return nil
 	}
 
-	// Construct ARN for the log group
-	arn := fmt.Sprintf("arn:aws:logs:%s::log-group:%s", region, logGroupName)
+	logGroupARN, err := utils.BuildRelatedARN(clusterARN, "logs", region, "log-group:"+logGroupName)
+	if err != nil {
+		return nil
+	}
 
 	return &common.CloudWatchLogReference{
-		Arn:          arn,
+		Arn:          logGroupARN,
 		LogGroupName: logGroupName,
 		Region:       region,
 	}
@@ -1006,7 +1009,7 @@ func discoverEksResourceReferences(cluster *eksTypes.Cluster, nodeGroups interfa
 				// Construct log group name for EKS cluster
 				logGroupName := fmt.Sprintf("/aws/eks/%s/cluster", *cluster.Name)
 				if !discoveredLogs[logGroupName] {
-					logRef := createCloudWatchLogReference(logGroupName, region)
+					logRef := createCloudWatchLogReference(logGroupName, *cluster.Arn, region)
 					if logRef != nil {
 						cloudWatchLogs = append(cloudWatchLogs, logRef)
 						discoveredLogs[logGroupName] = true

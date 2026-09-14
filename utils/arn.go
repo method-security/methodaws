@@ -3,10 +3,25 @@ package utils
 
 import (
 	"fmt"
+
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 )
 
-// BuildARN constructs an AWS ARN (Amazon Resource Name) with the standard format:
-// arn:aws:service:region:account-id:resource-type/resource-id
-func BuildARN(service, region, accountID, resourceType, resourceID string) string {
-	return fmt.Sprintf("arn:aws:%s:%s:%s:%s/%s", service, region, accountID, resourceType, resourceID)
+// BuildRelatedARN builds an ARN using the partition and account from an authoritative source ARN.
+func BuildRelatedARN(sourceARN, service, region, resource string) (string, error) {
+	parsedARN, err := arn.Parse(sourceARN)
+	if err != nil {
+		return "", fmt.Errorf("parse source ARN: %w", err)
+	}
+	if parsedARN.Partition == "" || parsedARN.AccountID == "" {
+		return "", fmt.Errorf("source ARN must include a partition and account ID")
+	}
+
+	return arn.ARN{
+		Partition: parsedARN.Partition,
+		Service:   service,
+		Region:    region,
+		AccountID: parsedARN.AccountID,
+		Resource:  resource,
+	}.String(), nil
 }

@@ -11,6 +11,7 @@ import (
 	// generated
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	lambdafern "github.com/Method-Security/methodaws/generated/go/lambda"
+	"github.com/Method-Security/methodaws/utils"
 
 	// external
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -25,6 +26,18 @@ func parseLambdaFunctionConfiguration(ctx context.Context, function types.Functi
 		svc1log.SafeParam("functionName", function.FunctionName),
 		svc1log.SafeParam("region", region))
 
+	if function.FunctionName == nil {
+		return nil, errors.New("function name is nil")
+	}
+	if function.FunctionArn == nil {
+		return nil, errors.New("function arn is nil")
+	}
+	if function.Role == nil {
+		return nil, errors.New("function role is nil")
+	}
+	if function.RevisionId == nil {
+		return nil, errors.New("function revision id is nil")
+	}
 	if function.LastModified == nil {
 		return nil, errors.New("function LastModified is nil")
 	}
@@ -72,20 +85,14 @@ func parseLambdaFunctionConfiguration(ctx context.Context, function types.Functi
 		}
 	}
 
-	if function.FunctionName == nil {
-		return nil, errors.New("function name is nil")
-	}
-
-	if function.FunctionArn == nil {
-		return nil, errors.New("function arn is nil")
-	}
-
-	if function.Role == nil {
-		return nil, errors.New("function role is nil")
-	}
-
-	if function.RevisionId == nil {
-		return nil, errors.New("function revision id is nil")
+	cloudWatchLogs, err := createCloudWatchLogReferences(
+		loggingConfig,
+		*function.FunctionName,
+		*function.FunctionArn,
+		region,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	// Handler can be nil for container-image-based Lambda functions
@@ -134,7 +141,7 @@ func parseLambdaFunctionConfiguration(ctx context.Context, function types.Functi
 			Vpc:            vpcReference,
 			IamRole:        createIamRoleReference(*function.Role, region),
 			SecurityGroups: createSecurityGroupReferences(securityGroupIds, region),
-			CloudWatchLogs: createCloudWatchLogReferences(loggingConfig, *function.FunctionName, region),
+			CloudWatchLogs: cloudWatchLogs,
 		},
 	}
 	return result, nil
@@ -261,29 +268,27 @@ func createSecurityGroupReferences(sgIDs []string, region string) []*common.Secu
 	return securityGroups
 }
 
-func createCloudWatchLogReferences(loggingConfig *lambdafern.LambdaLoggingConfig, functionName, region string) []*common.CloudWatchLogReference {
-	var logReferences []*common.CloudWatchLogReference
-
-	// Default Lambda log group
-	defaultLogGroup := "/aws/lambda/" + functionName
-	defaultArn := fmt.Sprintf("arn:aws:logs:%s::log-group:%s", region, defaultLogGroup)
-	logReferences = append(logReferences, &common.CloudWatchLogReference{
-		Arn:          defaultArn,
-		LogGroupName: defaultLogGroup,
-		Region:       region,
-	})
-
-	// Custom log group if specified
-	if loggingConfig != nil && loggingConfig.LogGroup != defaultLogGroup {
-		customArn := fmt.Sprintf("arn:aws:logs:%s::log-group:%s", region, loggingConfig.LogGroup)
-		logReferences = append(logReferences, &common.CloudWatchLogReference{
-			Arn:          customArn,
-			LogGroupName: loggingConfig.LogGroup,
-			Region:       region,
-		})
+func createCloudWatchLogReferences(
+	loggingConfig *lambdafern.LambdaLoggingConfig,
+	functionName string,
+	functionARN string,
+	region string,
+) ([]*common.CloudWatchLogReference, error) {
+	logGroupName := "/aws/lambda/" + functionName
+	if loggingConfig != nil {
+		logGroupName = loggingConfig.LogGroup
 	}
 
-	return logReferences
+	logGroupARN, err := utils.BuildRelatedARN(functionARN, "logs", region, "log-group:"+logGroupName)
+	if err != nil {
+		return nil, fmt.Errorf("build CloudWatch log group ARN: %w", err)
+	}
+
+	return []*common.CloudWatchLogReference{{
+		Arn:          logGroupARN,
+		LogGroupName: logGroupName,
+		Region:       region,
+	}}, nil
 }
 
 // Helper function to extract role name from ARN

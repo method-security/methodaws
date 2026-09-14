@@ -8,9 +8,7 @@ import (
 	"strings"
 
 	// Generated
-	common "github.com/Method-Security/methodaws/generated/go/common"
 	route53fern "github.com/Method-Security/methodaws/generated/go/route53"
-
 	// Internal
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -103,13 +101,7 @@ func listHostedZones(ctx context.Context, route53Client *route53.Client) ([]rout
 
 			// Add resources if there are record sets
 			if len(resourceRecordSets) > 0 {
-				zone.Resources = &route53fern.HostedZoneResourceInfo{
-					RecordSets: resourceRecordSets,
-					// Discover resource references from DNS records with deduplication
-					LoadBalancers:           discoverLoadBalancersFromRecords(resourceRecordSets),
-					CloudFrontDistributions: discoverCloudFrontFromRecords(resourceRecordSets),
-					S3Buckets:               discoverS3BucketsFromRecords(resourceRecordSets),
-				}
+				zone.Resources = resourceInfoForRecordSets(resourceRecordSets)
 			}
 
 			zones = append(zones, zone)
@@ -285,183 +277,9 @@ func EnumerateRoute53(ctx context.Context, awscfg aws.Config, config route53fern
 	return &report
 }
 
-// Resource discovery functions with deduplication
-func discoverLoadBalancersFromRecords(records []*route53fern.ResourceRecordSet) []*common.LoadBalancerReference {
-	lbMap := make(map[string]*common.LoadBalancerReference)
-
-	for _, record := range records {
-		if record.AliasTarget != nil && record.AliasTarget.DnsName != "" {
-			dnsName := record.AliasTarget.DnsName
-			if strings.Contains(dnsName, ".elb.amazonaws.com") ||
-				strings.Contains(dnsName, ".elasticloadbalancing.") {
-				key := dnsName
-				if _, exists := lbMap[key]; !exists {
-					// Extract region from ELB DNS name
-					region := extractRegionFromELBDnsName(dnsName)
-					lbName := extractLBNameFromDNSName(dnsName)
-					lbType := "ALB"
-					if strings.Contains(dnsName, "-nlb-") {
-						lbType = "NLB"
-					}
-
-					if region != "" && lbName != "" {
-						lbMap[key] = &common.LoadBalancerReference{
-							Arn:     constructLoadBalancerArnFromDNS(dnsName, region, lbType),
-							DnsName: &dnsName,
-							Region:  region,
-							Type:    common.LoadBalancerType(lbType),
-						}
-					}
-				}
-			}
-		}
+func resourceInfoForRecordSets(records []*route53fern.ResourceRecordSet) *route53fern.HostedZoneResourceInfo {
+	// DNS targets identify endpoints, but do not expose authoritative AWS resource ARNs.
+	return &route53fern.HostedZoneResourceInfo{
+		RecordSets: records,
 	}
-
-	var loadBalancers []*common.LoadBalancerReference
-	for _, lb := range lbMap {
-		loadBalancers = append(loadBalancers, lb)
-	}
-	return loadBalancers
-}
-
-func discoverCloudFrontFromRecords(records []*route53fern.ResourceRecordSet) []*common.CloudFrontDistributionReference {
-	cdnMap := make(map[string]*common.CloudFrontDistributionReference)
-
-	for _, record := range records {
-		if record.AliasTarget != nil && record.AliasTarget.DnsName != "" {
-			dnsName := record.AliasTarget.DnsName
-			if strings.Contains(dnsName, ".cloudfront.net") {
-				key := dnsName
-				if _, exists := cdnMap[key]; !exists {
-					// CloudFront distributions don't have region - they're global
-					cdnMap[key] = &common.CloudFrontDistributionReference{
-						Arn:        "arn:aws:cloudfront::" + dnsName, // Placeholder ARN format
-						DomainName: &dnsName,
-						Region:     "us-east-1", // Global service
-					}
-				}
-			}
-		}
-	}
-
-	var distributions []*common.CloudFrontDistributionReference
-	for _, dist := range cdnMap {
-		distributions = append(distributions, dist)
-	}
-	return distributions
-}
-
-func discoverS3BucketsFromRecords(records []*route53fern.ResourceRecordSet) []*common.S3BucketReference {
-	s3Map := make(map[string]*common.S3BucketReference)
-
-	for _, record := range records {
-		if record.AliasTarget != nil && record.AliasTarget.DnsName != "" {
-			dnsName := record.AliasTarget.DnsName
-			if strings.Contains(dnsName, ".s3-website") ||
-				(strings.Contains(dnsName, ".s3.") && strings.Contains(dnsName, ".amazonaws.com")) {
-				bucketName := extractS3BucketNameFromDNS(dnsName)
-				region := extractRegionFromS3DnsName(dnsName)
-
-				if bucketName != "" {
-					key := bucketName
-					if _, exists := s3Map[key]; !exists {
-						s3Map[key] = &common.S3BucketReference{
-							Arn:        "arn:aws:s3:::" + bucketName,
-							BucketName: &bucketName,
-							Region:     region,
-						}
-					}
-				}
-			}
-		}
-
-		// Also check resource records for S3 bucket references
-		if record.ResourceRecords != nil {
-			for _, rr := range record.ResourceRecords {
-				if strings.Contains(rr.Value, ".s3.amazonaws.com") ||
-					strings.Contains(rr.Value, ".s3-website") {
-					bucketName := extractS3BucketNameFromDNS(rr.Value)
-					region := extractRegionFromS3DnsName(rr.Value)
-
-					if bucketName != "" {
-						key := bucketName
-						if _, exists := s3Map[key]; !exists {
-							s3Map[key] = &common.S3BucketReference{
-								Arn:        "arn:aws:s3:::" + bucketName,
-								BucketName: &bucketName,
-								Region:     region,
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	var buckets []*common.S3BucketReference
-	for _, bucket := range s3Map {
-		buckets = append(buckets, bucket)
-	}
-	return buckets
-}
-
-// Helper functions to extract resource identifiers from DNS names
-func extractRegionFromELBDnsName(dnsName string) string {
-	// ELB format: name-123456789.region.elb.amazonaws.com
-	parts := strings.Split(dnsName, ".")
-	for i, part := range parts {
-		if part == "elb" && i > 0 {
-			return parts[i-1]
-		}
-	}
-	return ""
-}
-
-func extractLBNameFromDNSName(dnsName string) string {
-	parts := strings.Split(dnsName, ".")
-	if len(parts) > 0 {
-		return parts[0]
-	}
-	return ""
-}
-
-func constructLoadBalancerArnFromDNS(dnsName, region, lbType string) string {
-	lbName := extractLBNameFromDNSName(dnsName)
-	typePrefix := "app"
-	if lbType == "NLB" {
-		typePrefix = "net"
-	}
-	return "arn:aws:elasticloadbalancing:" + region + "::loadbalancer/" + typePrefix + "/" + lbName
-}
-
-func extractS3BucketNameFromDNS(dnsName string) string {
-	if strings.Contains(dnsName, ".s3-website") {
-		parts := strings.Split(dnsName, ".s3-website")
-		if len(parts) > 0 {
-			return parts[0]
-		}
-	}
-	if strings.Contains(dnsName, ".s3.") {
-		parts := strings.Split(dnsName, ".s3.")
-		if len(parts) > 0 {
-			return parts[0]
-		}
-	}
-	return ""
-}
-
-func extractRegionFromS3DnsName(dnsName string) string {
-	if strings.Contains(dnsName, ".s3.") {
-		parts := strings.Split(dnsName, ".s3.")
-		if len(parts) > 1 {
-			regionPart := parts[1]
-			if strings.Contains(regionPart, ".amazonaws.com") {
-				region := strings.Split(regionPart, ".amazonaws.com")[0]
-				if region != "" {
-					return region
-				}
-			}
-		}
-	}
-	return "us-east-1" // Default S3 region
 }

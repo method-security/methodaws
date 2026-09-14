@@ -3,7 +3,6 @@ package eks
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 
 	eksfern "github.com/Method-Security/methodaws/generated/go/eks"
 	"github.com/Method-Security/methodaws/internal/sts"
@@ -40,6 +39,18 @@ func CredsEks(ctx context.Context, cfg aws.Config, clusterName string) (*eksfern
 			Config: &eksfern.EksCredentialConfig{
 				AccountId:   account,
 				Regions:     []string{},
+				ClusterName: clusterName,
+			},
+			Result: &eksfern.EksCredentialResult{},
+			Errors: errors,
+		}, nil
+	}
+	if clusterOutput.Cluster == nil || clusterOutput.Cluster.Arn == nil || clusterOutput.Cluster.Name == nil {
+		errors = append(errors, "EKS cluster response is missing its ARN or name")
+		return &eksfern.EksCredentialReport{
+			Config: &eksfern.EksCredentialConfig{
+				AccountId:   account,
+				Regions:     []string{cfg.Region},
 				ClusterName: clusterName,
 			},
 			Result: &eksfern.EksCredentialResult{},
@@ -88,7 +99,7 @@ func CredsEks(ctx context.Context, cfg aws.Config, clusterName string) (*eksfern
 		Token:      encodedToken,
 		CaCert:     &caCert,
 		Expiration: &expiration,
-		ClusterArn: fmt.Sprintf("arn:aws:eks:%s:%s:cluster/%s", cfg.Region, aws.ToString(accountID), clusterName),
+		ClusterArn: *clusterOutput.Cluster.Arn,
 		Region:     cfg.Region,
 	}
 
