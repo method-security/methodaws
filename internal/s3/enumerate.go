@@ -4,6 +4,7 @@ package s3
 import (
 	// Standard
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -18,6 +19,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3control"
+	s3controltypes "github.com/aws/aws-sdk-go-v2/service/s3control/types"
+	"github.com/aws/smithy-go"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
@@ -114,22 +118,36 @@ func objectVersioning(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S
 	return bucket, errors
 }
 
-func bucketPermissions(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S3Bucket) (*s3fern.S3Bucket, error) {
+func bucketPermissions(
+	ctx context.Context,
+	s3Client *s3.Client,
+	bucket *s3fern.S3Bucket,
+	accountPublicAccessBlock publicAccessBlockState,
+) (*s3fern.S3Bucket, error) {
 	log := svc1log.FromContext(ctx)
+	var permissionErrors []error
 
 	// Get bucket policy
 	var policyDocument *string
+	policyKnown := false
 	policyInput := s3.GetBucketPolicyInput{
 		Bucket: aws.String(bucket.Identification.Name),
 	}
 	policyResult, policyErr := s3Client.GetBucketPolicy(ctx, &policyInput)
 	if policyErr != nil {
-		log.Debug("Failed to get bucket policy (may not exist)",
-			svc1log.SafeParam("bucketName", bucket.Identification.Name))
-		// Policy may not exist, continue without it
+		if isAWSAPIError(policyErr, "NoSuchBucketPolicy") {
+			policyKnown = true
+		} else {
+			permissionErrors = append(permissionErrors, fmt.Errorf("get bucket policy: %w", policyErr))
+			log.Debug("Failed to get bucket policy",
+				svc1log.SafeParam("bucketName", bucket.Identification.Name))
+		}
 	} else if policyResult != nil {
+		policyKnown = true
 		bucket.Configuration.Policy = policyResult.Policy
 		policyDocument = policyResult.Policy
+	} else {
+		permissionErrors = append(permissionErrors, fmt.Errorf("GetBucketPolicy returned no response"))
 	}
 
 	// Get bucket ACL
@@ -138,177 +156,101 @@ func bucketPermissions(ctx context.Context, s3Client *s3.Client, bucket *s3fern.
 		Bucket: aws.String(bucket.Identification.Name),
 	}
 	aclResult, aclErr := s3Client.GetBucketAcl(ctx, aclInput)
+	aclKnown := false
 	if aclErr != nil {
 		log.Warn("Failed to get bucket ACL",
 			svc1log.SafeParam("bucketName", bucket.Identification.Name),
 			svc1log.Stacktrace(aclErr))
-		return bucket, aclErr
+		permissionErrors = append(permissionErrors, fmt.Errorf("get bucket ACL: %w", aclErr))
+	} else if aclResult == nil {
+		permissionErrors = append(permissionErrors, fmt.Errorf("GetBucketAcl returned no response for bucket %s", bucket.Identification.Name))
+	} else {
+		aclKnown = true
+		grants = aclResult.Grants
 	}
-	if aclResult == nil {
-		return bucket, fmt.Errorf("GetBucketAcl returned no response for bucket %s", bucket.Identification.Name)
-	}
-	grants = aclResult.Grants
 
 	// Get public access block configuration
-	var publicAccessBlock *types.PublicAccessBlockConfiguration
+	bucketPublicAccessBlock := publicAccessBlockState{}
 	publicAccessInput := &s3.GetPublicAccessBlockInput{
 		Bucket: aws.String(bucket.Identification.Name),
 	}
 	publicAccessResult, publicAccessErr := s3Client.GetPublicAccessBlock(ctx, publicAccessInput)
 	if publicAccessErr != nil {
-		log.Debug("Failed to get public access block configuration (may not exist)",
-			svc1log.SafeParam("bucketName", bucket.Identification.Name))
-		// Public access block may not exist, continue without it
+		if isAWSAPIError(publicAccessErr, "NoSuchPublicAccessBlockConfiguration") {
+			bucketPublicAccessBlock.known = true
+		} else {
+			permissionErrors = append(permissionErrors, fmt.Errorf("get bucket Public Access Block: %w", publicAccessErr))
+			log.Debug("Failed to get bucket Public Access Block configuration",
+				svc1log.SafeParam("bucketName", bucket.Identification.Name))
+		}
 	} else if publicAccessResult != nil {
-		publicAccessBlock = publicAccessResult.PublicAccessBlockConfiguration
+		bucketPublicAccessBlock = publicAccessBlockState{
+			configuration: publicAccessResult.PublicAccessBlockConfiguration,
+			known:         true,
+		}
+	} else {
+		permissionErrors = append(permissionErrors, fmt.Errorf("GetPublicAccessBlock returned no response"))
 	}
 
-	// Process ACL grants, policy, and public access block together
-	accessControl := processS3Permissions(grants, policyDocument, publicAccessBlock)
+	accessControl, evaluationErr := evaluateS3Access(accessEvaluationInput{
+		bucketARN:                bucket.Identification.Arn,
+		grants:                   grants,
+		aclKnown:                 aclKnown,
+		policyDocument:           policyDocument,
+		policyKnown:              policyKnown,
+		bucketPublicAccessBlock:  bucketPublicAccessBlock,
+		accountPublicAccessBlock: accountPublicAccessBlock,
+	})
+	if evaluationErr != nil {
+		permissionErrors = append(permissionErrors, evaluationErr)
+	}
 	if accessControl != nil {
 		bucket.Configuration.AccessControl = accessControl
 	}
 
-	return bucket, nil
+	return bucket, errors.Join(permissionErrors...)
 }
 
-// processS3Permissions analyzes ACL grants, bucket policy, and public access block to create comprehensive access control
-func processS3Permissions(grants []types.Grant, policyDocument *string, publicAccessBlock *types.PublicAccessBlockConfiguration) *s3fern.S3BucketAccessControl {
-	accessControl := &s3fern.S3BucketAccessControl{}
-	hasPermissions := false
+func isAWSAPIError(err error, code string) bool {
+	var apiError smithy.APIError
+	return errors.As(err, &apiError) && apiError.ErrorCode() == code
+}
 
-	// First, process ACL grants
-	if len(grants) > 0 {
-		for _, grant := range grants {
-			if grant.Grantee == nil || grant.Grantee.URI == nil {
-				continue
-			}
-
-			granteeURI := *grant.Grantee.URI
-			permission := string(grant.Permission)
-
-			// Public Access permissions (AllUsers)
-			if granteeURI == "http://acs.amazonaws.com/groups/global/AllUsers" {
-				hasPermissions = true
-				switch permission {
-				case "READ":
-					accessControl.AllowPublicRead = aws.Bool(true)
-				case "WRITE":
-					accessControl.AllowPublicWrite = aws.Bool(true)
-				case "READ_ACP":
-					accessControl.AllowPublicReadAcp = aws.Bool(true)
-				case "WRITE_ACP":
-					accessControl.AllowPublicWriteAcp = aws.Bool(true)
-				case "FULL_CONTROL":
-					accessControl.AllowPublicFullControl = aws.Bool(true)
-				}
-			}
-
-			// Authenticated users permissions
-			if granteeURI == "http://acs.amazonaws.com/groups/global/AuthenticatedUsers" {
-				hasPermissions = true
-				switch permission {
-				case "READ":
-					accessControl.AllowAuthenticatedUsersRead = aws.Bool(true)
-				case "WRITE":
-					accessControl.AllowAuthenticatedUsersWrite = aws.Bool(true)
-				case "READ_ACP":
-					accessControl.AllowAuthenticatedUsersReadAcp = aws.Bool(true)
-				case "WRITE_ACP":
-					accessControl.AllowAuthenticatedUsersWriteAcp = aws.Bool(true)
-				case "FULL_CONTROL":
-					accessControl.AllowAuthenticatedUsersFullControl = aws.Bool(true)
-				}
-			}
-
-			// Log delivery permissions
-			if granteeURI == "http://acs.amazonaws.com/groups/s3/LogDelivery" {
-				hasPermissions = true
-				switch permission {
-				case "WRITE":
-					accessControl.AllowLogDeliveryWrite = aws.Bool(true)
-				case "READ_ACP":
-					accessControl.AllowLogDeliveryReadAcp = aws.Bool(true)
-				}
-			}
+func accountPublicAccessBlock(
+	ctx context.Context,
+	awsConfig aws.Config,
+	accountID string,
+) (publicAccessBlockState, error) {
+	output, err := s3control.NewFromConfig(awsConfig).GetPublicAccessBlock(ctx, &s3control.GetPublicAccessBlockInput{
+		AccountId: &accountID,
+	})
+	if err != nil {
+		if isAWSAPIError(err, "NoSuchPublicAccessBlockConfiguration") {
+			return publicAccessBlockState{known: true}, nil
 		}
+		return publicAccessBlockState{}, fmt.Errorf("get account Public Access Block: %w", err)
 	}
-
-	// Second, analyze bucket policy for additional permissions
-	if policyDocument != nil && *policyDocument != "" {
-		policyPermissions := analyzeBucketPolicy(*policyDocument)
-
-		// Merge policy-derived permissions with ACL permissions
-		if policyPermissions.AllowPublicRead && (accessControl.AllowPublicRead == nil || !*accessControl.AllowPublicRead) {
-			accessControl.AllowPublicRead = aws.Bool(true)
-			hasPermissions = true
-		}
-		if policyPermissions.AllowPublicWrite && (accessControl.AllowPublicWrite == nil || !*accessControl.AllowPublicWrite) {
-			accessControl.AllowPublicWrite = aws.Bool(true)
-			hasPermissions = true
-		}
-		if policyPermissions.AllowAuthenticatedUsersRead && (accessControl.AllowAuthenticatedUsersRead == nil || !*accessControl.AllowAuthenticatedUsersRead) {
-			accessControl.AllowAuthenticatedUsersRead = aws.Bool(true)
-			hasPermissions = true
-		}
-		if policyPermissions.AllowAuthenticatedUsersWrite && (accessControl.AllowAuthenticatedUsersWrite == nil || !*accessControl.AllowAuthenticatedUsersWrite) {
-			accessControl.AllowAuthenticatedUsersWrite = aws.Bool(true)
-			hasPermissions = true
-		}
+	if output == nil {
+		return publicAccessBlockState{}, fmt.Errorf("GetPublicAccessBlock returned no account response")
 	}
+	return publicAccessBlockState{
+		configuration: convertAccountPublicAccessBlock(output.PublicAccessBlockConfiguration),
+		known:         true,
+	}, nil
+}
 
-	// Third, add public access block configuration
-	if publicAccessBlock != nil {
-		accessControl.BlockPublicAcls = publicAccessBlock.BlockPublicAcls
-		accessControl.IgnorePublicAcls = publicAccessBlock.IgnorePublicAcls
-		accessControl.BlockPublicPolicy = publicAccessBlock.BlockPublicPolicy
-		accessControl.RestrictPublicBuckets = publicAccessBlock.RestrictPublicBuckets
-		hasPermissions = true // Public access block config is always relevant
-	}
-
-	if !hasPermissions {
+func convertAccountPublicAccessBlock(
+	configuration *s3controltypes.PublicAccessBlockConfiguration,
+) *types.PublicAccessBlockConfiguration {
+	if configuration == nil {
 		return nil
 	}
-
-	return accessControl
-}
-
-// PolicyPermissions represents permissions derived from bucket policy analysis
-type PolicyPermissions struct {
-	AllowPublicRead              bool
-	AllowPublicWrite             bool
-	AllowAuthenticatedUsersRead  bool
-	AllowAuthenticatedUsersWrite bool
-}
-
-// analyzeBucketPolicy analyzes a bucket policy JSON and extracts permission flags
-func analyzeBucketPolicy(policyJSON string) PolicyPermissions {
-	permissions := PolicyPermissions{}
-
-	// Simple pattern matching for common policy patterns
-	// This could be enhanced with full JSON parsing for more complex scenarios
-
-	// Check for public read access: "Principal":"*" with "s3:GetObject"
-	if strings.Contains(policyJSON, `"Principal":"*"`) || strings.Contains(policyJSON, `"Principal": "*"`) {
-		if strings.Contains(policyJSON, `"s3:GetObject"`) {
-			permissions.AllowPublicRead = true
-		}
-		if strings.Contains(policyJSON, `"s3:PutObject"`) || strings.Contains(policyJSON, `"s3:DeleteObject"`) {
-			permissions.AllowPublicWrite = true
-		}
+	return &types.PublicAccessBlockConfiguration{
+		BlockPublicAcls:       configuration.BlockPublicAcls,
+		IgnorePublicAcls:      configuration.IgnorePublicAcls,
+		BlockPublicPolicy:     configuration.BlockPublicPolicy,
+		RestrictPublicBuckets: configuration.RestrictPublicBuckets,
 	}
-
-	// Check for authenticated users: AWS account principals
-	if strings.Contains(policyJSON, `"AWS"`) {
-		if strings.Contains(policyJSON, `"s3:GetObject"`) {
-			permissions.AllowAuthenticatedUsersRead = true
-		}
-		if strings.Contains(policyJSON, `"s3:PutObject"`) || strings.Contains(policyJSON, `"s3:DeleteObject"`) {
-			permissions.AllowAuthenticatedUsersWrite = true
-		}
-	}
-
-	return permissions
 }
 
 // EnumerateS3 retrieves all S3 buckets available to the caller and returns an EnumerateResourceReport struct. Non-fatal
@@ -357,6 +299,19 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 		return report
 	}
 
+	accountPABConfig := awscfg.Copy()
+	if accountPABConfig.Region == "" {
+		if len(config.Regions) > 0 {
+			accountPABConfig.Region = config.Regions[0]
+		} else {
+			accountPABConfig.Region = "us-east-1"
+		}
+	}
+	accountPAB, accountPABErr := accountPublicAccessBlock(ctx, accountPABConfig, config.AccountId)
+	if accountPABErr != nil {
+		errors = append(errors, accountPABErr.Error())
+	}
+
 	// Create a map of buckets by region for efficient processing
 	bucketsByRegion := make(map[string][]s3fern.S3Bucket)
 	errorMessages := []string{}
@@ -401,6 +356,17 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 
 		region := normalizeBucketRegion(regionOutput.LocationConstraint)
 		s3Bucket.Identification.Region = region
+		bucketARN, err := methodawsutils.BuildGlobalARNForRegion(region, "s3", "", s3Bucket.Identification.Name)
+		if err != nil {
+			errorMessages = append(errorMessages, err.Error())
+			continue
+		}
+		s3Bucket.Identification.Arn = bucketARN
+		s3Bucket.Identification.Url = fmt.Sprintf(
+			"https://%s.s3.%s.amazonaws.com",
+			s3Bucket.Identification.Name,
+			s3Bucket.Identification.Region,
+		)
 
 		// Group buckets by region
 		bucketsByRegion[region] = append(bucketsByRegion[region], s3Bucket)
@@ -451,19 +417,10 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			}
 
 			// Process bucket policy, ACL, and public access block together to avoid redundant permissions
-			bucketPtr, err = bucketPermissions(ctx, regionClient, bucketPtr)
+			bucketPtr, err = bucketPermissions(ctx, regionClient, bucketPtr, accountPAB)
 			if err != nil {
 				errorMessages = append(errorMessages, err.Error())
 			}
-
-			bucketPtr.Identification.Url = fmt.Sprintf("https://%s.s3.%s.amazonaws.com", bucketPtr.Identification.Name, bucketPtr.Identification.Region)
-
-			bucketARN, err := methodawsutils.BuildGlobalARNForRegion(region, "s3", "", bucketPtr.Identification.Name)
-			if err != nil {
-				errorMessages = append(errorMessages, err.Error())
-				continue
-			}
-			bucketPtr.Identification.Arn = bucketARN
 
 			// Add resource discovery
 			bucketPtr.Resources = discoverS3Resources(bucketPtr)
@@ -474,7 +431,7 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	if len(s3Buckets) > 0 {
 		report.Result.S3Buckets = s3Buckets
 	}
-	report.Errors = errorMessages
+	report.Errors = append(errors, errorMessages...)
 	return report
 }
 

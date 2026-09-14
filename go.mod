@@ -14,6 +14,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/iam v1.59.1
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.101.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.2
+	github.com/aws/aws-sdk-go-v2/service/s3control v1.73.6
 	github.com/aws/aws-sdk-go-v2/service/sts v1.45.6
 	github.com/aws/aws-sdk-go-v2/service/wafv2 v1.77.5
 	github.com/google/uuid v1.6.0
