@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
+	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/apigateway"
 	"github.com/aws/aws-sdk-go-v2/service/apigateway/types"
@@ -67,9 +68,9 @@ func enumerateV1ApiGatewaysForRegion(ctx context.Context, cfg aws.Config, region
 
 		// Process APIs sequentially
 		for _, api := range result.Items {
-			if api.Id == nil {
-				log.Warn("REST API ID is nil, skipping API", svc1log.SafeParam("region", region))
-				errors = append(errors, "REST API ID is nil")
+			if aws.ToString(api.Id) == "" {
+				log.Warn("REST API ID is missing, skipping API", svc1log.SafeParam("region", region))
+				errors = append(errors, "REST API ID is missing")
 				continue
 			}
 
@@ -80,31 +81,20 @@ func enumerateV1ApiGatewaysForRegion(ctx context.Context, cfg aws.Config, region
 					svc1log.SafeParam("apiId", *api.Id),
 					svc1log.Stacktrace(err))
 				errors = append(errors, fmt.Sprintf("GetStages failed for API %s: %s", *api.Id, err.Error()))
-				continue
-			}
-			if stages == nil {
+			} else if stages == nil {
 				errors = append(errors, fmt.Sprintf("GetStages returned no response for API %s", *api.Id))
-				continue
 			}
 
-			// Process each stage as a separate API Gateway instance
-			for _, stage := range stages.Item {
-				if stage.StageName == nil {
-					log.Warn("Stage name is nil, skipping stage",
-						svc1log.SafeParam("region", region),
-						svc1log.SafeParam("apiId", *api.Id))
-					errors = append(errors, fmt.Sprintf("Stage name is nil for API %s", *api.Id))
-					continue
-				}
-				apiGw, errs := convertV1RestAPIToFern(ctx, client, api, stage, region)
-
-				if apiGw != nil {
-					apiGateways = append(apiGateways, apiGw)
-				}
-				// Add context to conversion errors
-				for _, err := range errs {
-					errors = append(errors, fmt.Sprintf("API %s stage %s: %s", *api.Id, *stage.StageName, err))
-				}
+			var apiStages []types.Stage
+			if stages != nil {
+				apiStages = stages.Item
+			}
+			apiGw, errs := convertV1RestAPIToFern(ctx, client, api, apiStages, region)
+			if apiGw != nil {
+				apiGateways = append(apiGateways, apiGw)
+			}
+			for _, err := range errs {
+				errors = append(errors, fmt.Sprintf("API %s: %s", *api.Id, err))
 			}
 		}
 	}
@@ -113,16 +103,25 @@ func enumerateV1ApiGatewaysForRegion(ctx context.Context, cfg aws.Config, region
 }
 
 // convertV1RestAPIToFern converts AWS REST API to Fern RestApiGateway struct
-func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api types.RestApi, stage types.Stage, region string) (*apigatewayfern.ApiGatewayInstance, []string) {
+func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api types.RestApi, stages []types.Stage, region string) (*apigatewayfern.ApiGatewayInstance, []string) {
 	log := svc1log.FromContext(ctx)
 	var errors []string
 
-	// Construct base URL for this stage
-	baseURL := fmt.Sprintf("https://%s.execute-api.%s.amazonaws.com/%s", *api.Id, region, *stage.StageName)
+	if aws.ToString(api.Id) == "" {
+		return nil, []string{"REST API ID is missing"}
+	}
+	var stageNames []string
+	for _, stage := range stages {
+		if aws.ToString(stage.StageName) == "" {
+			errors = append(errors, "REST API stage name is missing")
+			continue
+		}
+		stageNames = append(stageNames, *stage.StageName)
+	}
 
 	// Get resources and methods with security info
-	routes, errs := getRestAPIRoutes(ctx, client, *api.Id, region)
-	errors = append(errors, errs...)
+	routes, routeErrors := getRestAPIRoutes(ctx, client, *api.Id, region)
+	errors = append(errors, routeErrors...)
 
 	// Get endpoint configuration (not used in simplified version)
 	_, err := getEndpointConfiguration(api.EndpointConfiguration)
@@ -131,7 +130,7 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 	}
 
 	// Get certificates
-	certificates, errs := getAPICertificates(ctx, client)
+	certificates, errs := getAPICertificates(ctx, client, *api.Id)
 	for _, err := range errs {
 		log.Warn("Certificate retrieval error",
 			svc1log.SafeParam("apiId", *api.Id),
@@ -139,30 +138,33 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 		errors = append(errors, fmt.Sprintf("Certificate retrieval failed for API %s: %s", *api.Id, err))
 	}
 
-	// Get API keys and usage plans
-	apiKeys, _, errs := getAPIKeysAndUsagePlans(ctx, client, *api.Id)
-	for _, err := range errs {
-		log.Warn("API keys/usage plans retrieval error",
-			svc1log.SafeParam("apiId", *api.Id),
-			svc1log.SafeParam("error", err))
-		errors = append(errors, fmt.Sprintf("API keys/usage plans retrieval failed for API %s: %s", *api.Id, err))
-	}
-
-	// Get access log settings from stage
-	accessLogSettings, err := getAccessLogSettings(stage)
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("Access log settings parsing failed for API %s stage %s: %s", *api.Id, *stage.StageName, err.Error()))
+	// The API-level scalar fields can describe a stage only when there is exactly one.
+	var baseURL, clientCertificateID *string
+	var accessLogSettings *apigatewayfern.AccessLogSettings
+	if len(stages) == 1 && len(stageNames) == 1 {
+		suffix, suffixErr := utils.AWSDNSSuffixForRegion(region)
+		if suffixErr != nil {
+			errors = append(errors, suffixErr.Error())
+		} else {
+			baseURL = aws.String(fmt.Sprintf("https://%s.execute-api.%s.%s/%s", *api.Id, region, suffix, stageNames[0]))
+		}
+		clientCertificateID = stages[0].ClientCertificateId
+		accessLogSettings, err = getAccessLogSettings(stages[0])
+		if err != nil {
+			errors = append(errors, err.Error())
+		}
 	}
 
 	// Discover resource relationships
 	// Resources are now nested within routes, no need for separate discovery
 
 	// Perform security analysis
-	securityAnalysis := analyzeAPISecurity(routes, certificates, accessLogSettings, nil, apiKeys)
-
-	var stageName string
-	if stage.StageName != nil {
-		stageName = *stage.StageName
+	securityAnalysis := analyzeAPISecurity(routes, certificates, accessLogSettings, nil)
+	if securityAnalysis != nil && len(routeErrors) > 0 && !aws.ToBool(securityAnalysis.ApiKeysRequired) {
+		securityAnalysis.ApiKeysRequired = nil
+	}
+	if securityAnalysis != nil && (len(stages) != 1 || len(stageNames) != 1) {
+		securityAnalysis.HasCloudWatchLogging = nil
 	}
 
 	// Create identification info
@@ -177,9 +179,9 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 	configuration := &apigatewayfern.ApiGatewayConfigurationInfo{
 		Version:             apigatewayfern.ApiGatewayVersionV1,
 		Description:         api.Description,
-		Stages:              []string{stageName},
+		Stages:              stageNames,
 		AccessLogSettings:   accessLogSettings,
-		ClientCertificateId: stage.ClientCertificateId,
+		ClientCertificateId: clientCertificateID,
 		Certificates:        certificates,
 		Security:            securityAnalysis,
 	}
@@ -375,13 +377,12 @@ func convertV1Integration(
 
 	case types.IntegrationTypeAws:
 		if methodIntegration.Uri == nil {
-			return nil, fmt.Errorf("AWS integration missing ARN")
+			return nil, fmt.Errorf("AWS integration missing URI")
 		}
 
-		backend := &apigatewayfern.AwsServiceBackend{
-			Arn:     *methodIntegration.Uri,
-			Service: extractServiceFromArn(*methodIntegration.Uri),
-			Region:  region,
+		backend, err := awsServiceBackendFromIntegrationURI(*methodIntegration.Uri)
+		if err != nil {
+			return nil, err
 		}
 
 		return &apigatewayfern.Integration{Type: "aws", Aws: &apigatewayfern.AwsIntegration{
@@ -415,15 +416,9 @@ func convertV1Integration(
 		if methodIntegration.Uri == nil {
 			return nil, fmt.Errorf("AWS Proxy integration missing ARN")
 		}
-		functionARN, functionName, err := lambdaFunctionFromIntegrationURI(*methodIntegration.Uri)
+		backend, err := lambdaBackendFromIntegrationURI(*methodIntegration.Uri)
 		if err != nil {
 			return nil, err
-		}
-
-		backend := &apigatewayfern.LambdaBackend{
-			Arn:          functionARN,
-			FunctionName: functionName,
-			Region:       region,
 		}
 
 		return &apigatewayfern.Integration{Type: "aws_proxy", AwsProxy: &apigatewayfern.AwsProxyIntegration{
@@ -439,15 +434,6 @@ func convertV1Integration(
 	default:
 		return nil, fmt.Errorf("unsupported integration type: %s", methodIntegration.Type)
 	}
-}
-
-// extractServiceFromArn extracts the service name from an AWS ARN
-func extractServiceFromArn(arn string) string {
-	parts := strings.Split(arn, ":")
-	if len(parts) >= 3 {
-		return parts[2] // Service is the 3rd element (0-indexed position 2)
-	}
-	return "unknown"
 }
 
 // isVpcLinkIntegration checks if the integration uses a VPC Link
@@ -515,7 +501,7 @@ func getEndpointConfiguration(endpointConfig *types.EndpointConfiguration) (*api
 }
 
 // getAPICertificates retrieves domain name certificates for the API
-func getAPICertificates(ctx context.Context, client *apigateway.Client) ([]*apigatewayfern.Certificate, []string) {
+func getAPICertificates(ctx context.Context, client *apigateway.Client, apiID string) ([]*apigatewayfern.Certificate, []string) {
 	log := svc1log.FromContext(ctx)
 	var certificates []*apigatewayfern.Certificate
 	var errors []string
@@ -535,9 +521,37 @@ func getAPICertificates(ctx context.Context, client *apigateway.Client) ([]*apig
 	}
 
 	for _, domain := range allDomains {
-		if domain.CertificateArn != nil {
+		if aws.ToString(domain.DomainName) == "" {
+			continue
+		}
+		mapped := false
+		mappings := apigateway.NewGetBasePathMappingsPaginator(client, &apigateway.GetBasePathMappingsInput{DomainName: domain.DomainName})
+		for mappings.HasMorePages() {
+			page, err := mappings.NextPage(ctx)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("GetBasePathMappings failed for domain %s: %s", *domain.DomainName, err))
+				break
+			}
+			for _, mapping := range page.Items {
+				if aws.ToString(mapping.RestApiId) == apiID {
+					mapped = true
+					break
+				}
+			}
+			if mapped {
+				break
+			}
+		}
+		if !mapped {
+			continue
+		}
+		certificateARN := domain.CertificateArn
+		if aws.ToString(certificateARN) == "" {
+			certificateARN = domain.RegionalCertificateArn
+		}
+		if aws.ToString(certificateARN) != "" {
 			cert := &apigatewayfern.Certificate{
-				Arn:        *domain.CertificateArn,
+				Arn:        *certificateARN,
 				DomainName: domain.DomainName,
 			}
 
@@ -558,57 +572,6 @@ func getAPICertificates(ctx context.Context, client *apigateway.Client) ([]*apig
 	}
 
 	return certificates, errors
-}
-
-// getAPIKeysAndUsagePlans retrieves API keys and usage plans associated with the API
-func getAPIKeysAndUsagePlans(ctx context.Context, client *apigateway.Client, apiID string) ([]string, []string, []string) {
-	log := svc1log.FromContext(ctx)
-	var apiKeys []string
-	var usagePlans []string
-	var errors []string
-
-	// Get API keys with pagination
-	keysPaginator := apigateway.NewGetApiKeysPaginator(client, &apigateway.GetApiKeysInput{})
-	for keysPaginator.HasMorePages() {
-		page, err := keysPaginator.NextPage(ctx)
-		if err != nil {
-			log.Warn("Failed to get API keys",
-				svc1log.SafeParam("apiId", apiID),
-				svc1log.Stacktrace(err))
-			errors = append(errors, fmt.Sprintf("GetApiKeys failed: %s", err.Error()))
-			break
-		}
-		for _, key := range page.Items {
-			if key.Id != nil {
-				apiKeys = append(apiKeys, *key.Id)
-			}
-		}
-	}
-
-	// Get usage plans with pagination
-	plansPaginator := apigateway.NewGetUsagePlansPaginator(client, &apigateway.GetUsagePlansInput{})
-	for plansPaginator.HasMorePages() {
-		page, err := plansPaginator.NextPage(ctx)
-		if err != nil {
-			log.Warn("Failed to get usage plans",
-				svc1log.SafeParam("apiId", apiID),
-				svc1log.Stacktrace(err))
-			errors = append(errors, fmt.Sprintf("GetUsagePlans failed: %s", err.Error()))
-			break
-		}
-		for _, plan := range page.Items {
-			if plan.Id != nil && plan.ApiStages != nil {
-				for _, apiStage := range plan.ApiStages {
-					if apiStage.ApiId != nil && *apiStage.ApiId == apiID {
-						usagePlans = append(usagePlans, *plan.Id)
-						break
-					}
-				}
-			}
-		}
-	}
-
-	return apiKeys, usagePlans, errors
 }
 
 // getAccessLogSettings converts stage access log settings

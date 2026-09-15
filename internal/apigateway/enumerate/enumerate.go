@@ -81,10 +81,6 @@ func isIAMRole(arn string) bool {
 	return strings.Contains(arn, ":iam:") && strings.Contains(arn, ":role/")
 }
 
-func isCloudWatchLogGroup(arn string) bool {
-	return strings.Contains(arn, ":logs:") && strings.Contains(arn, ":log-group:")
-}
-
 // Helper function to identify resource type (removed - no longer used in simplified schema)
 
 // createIamRoleReference creates an IAM role reference from an ARN
@@ -102,24 +98,6 @@ func createIamRoleReference(arn, region string) *common.IamRoleReference {
 		Arn:      arn,
 		RoleName: roleName,
 		Region:   region,
-	}
-}
-
-// createCloudWatchLogReference creates a CloudWatch log reference from an ARN
-func createCloudWatchLogReference(arn, region string) *common.CloudWatchLogReference {
-	if !isCloudWatchLogGroup(arn) {
-		return nil
-	}
-
-	logGroupName := extractResourceNameFromArn(arn)
-	if logGroupName == nil {
-		return nil
-	}
-
-	return &common.CloudWatchLogReference{
-		Arn:          arn,
-		LogGroupName: *logGroupName,
-		Region:       region,
 	}
 }
 
@@ -148,45 +126,77 @@ func extractResourceNameFromArn(arn string) *string {
 	return nil
 }
 
-func lambdaFunctionFromIntegrationURI(integrationURI string) (string, *string, error) {
+func lambdaBackendFromIntegrationURI(integrationURI string) (*apigatewayfern.LambdaBackend, error) {
 	parsedURI, err := awsarn.Parse(integrationURI)
 	if err != nil {
-		return "", nil, fmt.Errorf("parse Lambda integration URI: %w", err)
+		return nil, fmt.Errorf("parse Lambda integration URI: %w", err)
 	}
 
 	functionARN := integrationURI
 	if parsedURI.Service == "apigateway" {
 		markerIndex := strings.Index(parsedURI.Resource, lambdaInvocationResourceMarker)
 		if markerIndex < 0 {
-			return "", nil, fmt.Errorf("API Gateway Lambda integration URI is missing a function ARN")
+			return nil, fmt.Errorf("API Gateway Lambda integration URI is missing a function ARN")
 		}
 		functionARN = parsedURI.Resource[markerIndex+len(lambdaInvocationResourceMarker):]
 		var found bool
 		functionARN, found = strings.CutSuffix(functionARN, "/invocations")
 		if !found {
-			return "", nil, fmt.Errorf("API Gateway Lambda integration URI is missing the invocations suffix")
+			return nil, fmt.Errorf("API Gateway Lambda integration URI is missing the invocations suffix")
 		}
 	}
 
 	parsedFunctionARN, err := awsarn.Parse(functionARN)
-	if err != nil || parsedFunctionARN.Service != "lambda" {
-		return "", nil, fmt.Errorf("API Gateway integration does not contain a valid Lambda ARN")
+	if err != nil || parsedFunctionARN.Service != "lambda" || parsedFunctionARN.Partition == "" ||
+		parsedFunctionARN.Region == "" || parsedFunctionARN.AccountID == "" || strings.ContainsAny(functionARN, "*?${}") {
+		return nil, fmt.Errorf("API Gateway integration does not contain a complete Lambda ARN")
 	}
 	resourceParts := strings.Split(parsedFunctionARN.Resource, ":")
 	if len(resourceParts) < 2 || resourceParts[0] != "function" || resourceParts[1] == "" {
-		return "", nil, fmt.Errorf("API Gateway integration does not contain a Lambda function ARN")
+		return nil, fmt.Errorf("API Gateway integration does not contain a Lambda function ARN")
 	}
 	functionName := resourceParts[1]
-	return functionARN, &functionName, nil
+	return &apigatewayfern.LambdaBackend{
+		Arn:          functionARN,
+		FunctionName: &functionName,
+		Region:       parsedFunctionARN.Region,
+	}, nil
+}
+
+func awsServiceBackendFromIntegrationURI(uri string) (*apigatewayfern.AwsServiceBackend, error) {
+	parsed, err := awsarn.Parse(uri)
+	if err != nil || parsed.Service != "apigateway" || parsed.Partition == "" || parsed.Region == "" || parsed.AccountID == "" {
+		return nil, fmt.Errorf("invalid AWS service integration URI %q", uri)
+	}
+	// API Gateway operation URIs use the ARN account slot for the integrated service.
+	serviceParts := strings.Split(parsed.AccountID, ".")
+	service := serviceParts[len(serviceParts)-1]
+	if service == "" || (!strings.HasPrefix(parsed.Resource, "path/") && !strings.HasPrefix(parsed.Resource, "action/")) {
+		return nil, fmt.Errorf("invalid AWS service integration operation %q", uri)
+	}
+	return &apigatewayfern.AwsServiceBackend{Uri: uri, Service: service, Region: parsed.Region}, nil
 }
 
 // analyzeAPISecurity performs security analysis on API Gateway configurations
-func analyzeAPISecurity(routes []*apigatewayfern.Route, certificates []*apigatewayfern.Certificate, accessLogSettings *apigatewayfern.AccessLogSettings, corsConfig *apigatewayfern.CorsConfiguration, apiKeys []string) *apigatewayfern.ApiGatewaySecurity {
+func analyzeAPISecurity(routes []*apigatewayfern.Route, certificates []*apigatewayfern.Certificate, accessLogSettings *apigatewayfern.AccessLogSettings, corsConfig *apigatewayfern.CorsConfiguration) *apigatewayfern.ApiGatewaySecurity {
 	if routes == nil {
 		return nil
 	}
 
-	requiredAPIKeys := len(apiKeys) > 0
+	var requiredAPIKeys *bool
+	allKeyRequirementsKnown := len(routes) > 0
+	for _, route := range routes {
+		if route == nil || route.Configuration == nil || route.Configuration.ApiKeyRequired == nil {
+			allKeyRequirementsKnown = false
+			continue
+		}
+		if *route.Configuration.ApiKeyRequired {
+			requiredAPIKeys = aws.Bool(true)
+		}
+	}
+	if requiredAPIKeys == nil && allKeyRequirementsKnown {
+		requiredAPIKeys = aws.Bool(false)
+	}
 	hasCloudWatchLogging := accessLogSettings != nil
 	hasCorsConfig := corsConfig != nil
 	analysis := &apigatewayfern.ApiGatewaySecurity{
@@ -194,7 +204,7 @@ func analyzeAPISecurity(routes []*apigatewayfern.Route, certificates []*apigatew
 		AuthenticationMethods: []apigatewayfern.AuthorizationType{},
 		TlsVersions:           []apigatewayfern.SecurityPolicy{},
 		CorsConfigured:        &hasCorsConfig,
-		ApiKeysRequired:       &requiredAPIKeys,
+		ApiKeysRequired:       requiredAPIKeys,
 	}
 
 	// Track unique authentication methods
@@ -256,15 +266,6 @@ func createRouteResources(integration *apigatewayfern.Integration, region string
 	case "vpc_link":
 		// VPC Link details are stored in integration.backend only, no duplication in route resources
 		// Only set VPC and security group references if needed for the route itself
-
-	case "aws":
-		if aws := integration.Aws; aws != nil && aws.Backend != nil {
-			// Set execution role for AWS service integration
-			links.ExecutionRole = createIamRoleReference(aws.Backend.Arn, region)
-			if isCloudWatchLogGroup(aws.Backend.Arn) {
-				links.CloudWatchLog = createCloudWatchLogReference(aws.Backend.Arn, region)
-			}
-		}
 	}
 
 	// Return nil if no resources were found

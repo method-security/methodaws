@@ -81,7 +81,7 @@ func enumerateV2ApiGatewaysForRegion(ctx context.Context, cfg aws.Config, region
 
 		// Process APIs sequentially
 		for _, api := range result.Items {
-			if api.ApiId == nil {
+			if aws.ToString(api.ApiId) == "" {
 				log.Warn("HTTP API ID is nil", svc1log.SafeParam("api", api))
 				errors = append(errors, "HTTP API ID is nil")
 				continue
@@ -110,7 +110,7 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 
 	var errors []string
 
-	if api.ApiId == nil {
+	if aws.ToString(api.ApiId) == "" {
 		log.Warn("API Gateway API ID is nil")
 		errors = append(errors, "api gateway API ID is nil")
 		return nil, errors
@@ -156,19 +156,14 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	// Access log settings are included in the stage response already collected above.
 	accessLogSettings := accessLogSettingsFromHTTPAPIStages(stages)
 	// Perform security analysis
-	securityAnalysis := analyzeAPISecurity(routes, certificates, accessLogSettings, corsConfig, nil) // V2 doesn't use API keys the same way
-
-	var apiEndpoint string
-	if api.ApiEndpoint != nil {
-		apiEndpoint = *api.ApiEndpoint
-	}
+	securityAnalysis := analyzeAPISecurity(routes, certificates, accessLogSettings, corsConfig)
 
 	// Create identification info
 	identification := &apigatewayfern.ApiGatewayIdentificationInfo{
 		Id:     *api.ApiId,
 		Name:   api.Name,
 		Region: region,
-		Url:    apiEndpoint,
+		Url:    api.ApiEndpoint,
 	}
 
 	configuration := &apigatewayfern.ApiGatewayConfigurationInfo{
@@ -370,11 +365,9 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 		}}, nil
 
 	case types.IntegrationTypeAws:
-		arn := aws.ToString(integration.IntegrationUri)
-		backend := &apigatewayfern.AwsServiceBackend{
-			Arn:     arn,
-			Service: extractServiceFromArn(arn),
-			Region:  region,
+		backend, err := awsServiceBackendFromIntegrationURI(aws.ToString(integration.IntegrationUri))
+		if err != nil {
+			return nil, err
 		}
 
 		return &apigatewayfern.Integration{Type: "aws", Aws: &apigatewayfern.AwsIntegration{
@@ -406,16 +399,10 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 		}}, nil
 
 	case types.IntegrationTypeAwsProxy:
-		functionARN, functionName, err := lambdaFunctionFromIntegrationURI(aws.ToString(integration.IntegrationUri))
+		backend, err := lambdaBackendFromIntegrationURI(aws.ToString(integration.IntegrationUri))
 		if err != nil {
 			return nil, err
 		}
-		backend := &apigatewayfern.LambdaBackend{
-			Arn:          functionARN,
-			FunctionName: functionName,
-			Region:       region,
-		}
-
 		return &apigatewayfern.Integration{Type: "aws_proxy", AwsProxy: &apigatewayfern.AwsProxyIntegration{
 			Backend: backend,
 		}}, nil

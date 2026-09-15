@@ -96,7 +96,8 @@ types:
       isExternal: boolean
   AwsServiceBackend:
     properties:
-      arn: string
+      # Integration operation URI, not the ARN of a target resource.
+      uri: string
       service: string
       region: string
   MockBackend:
@@ -159,7 +160,7 @@ types:
       id: string
       name: optional<string>
       region: string
-      url: string
+      url: optional<string>
   ApiGatewayConfigurationInfo:
     properties:
       version: ApiGatewayVersion
