@@ -104,6 +104,14 @@ func enumerateV2LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 				continue
 			}
 
+			if lb.Scheme != "" {
+				if scheme, err := loadbalancerfern.NewLoadBalancerSchemeFromString(strings.ToUpper(strings.ReplaceAll(string(lb.Scheme), "-", "_"))); err == nil {
+					configuration.Scheme = &scheme
+				} else {
+					errorMessages = append(errorMessages, fmt.Sprintf("Failed to convert load balancer scheme for %s in region %s: %s", *lb.LoadBalancerArn, region, err.Error()))
+				}
+			}
+
 			// Convert IP address type
 			if lb.IpAddressType != "" {
 				if ipType, err := loadbalancerfern.NewIpAddressTypeFromString(strings.ToUpper(string(lb.IpAddressType))); err == nil {

@@ -77,6 +77,14 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 				HostedZoneId:     lb.CanonicalHostedZoneNameID,
 			}
 
+			if aws.ToString(lb.Scheme) != "" {
+				if scheme, err := loadbalancerfern.NewLoadBalancerSchemeFromString(strings.ToUpper(strings.ReplaceAll(*lb.Scheme, "-", "_"))); err == nil {
+					configuration.Scheme = &scheme
+				} else {
+					errorMessages = append(errorMessages, fmt.Sprintf("Failed to convert load balancer scheme for %s in region %s: %s", identification.Arn, region, err.Error()))
+				}
+			}
+
 			// Get targets and listeners
 			targets, errors := targetsForLoadBalancerV1(lb)
 			for _, err := range errors {

@@ -27,6 +27,10 @@ types:
       - PROVISIONING
       - ACTIVE_IMPAIRED
       - FAILED
+  LoadBalancerScheme:
+    enum:
+      - INTERNET_FACING
+      - INTERNAL
   IpAddressType:
     enum:
       - IPV4
@@ -105,6 +109,8 @@ types:
   LoadBalancerConfigurationInfo:
     properties:
       loadBalancerType: LoadBalancerType
+      # AWS scheme, not a determination of effective reachability.
+      scheme: optional<LoadBalancerScheme>
       dnsName: optional<string>
       createdTime: optional<datetime>
       hostedZoneId: optional<string>
