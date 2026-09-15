@@ -15,6 +15,7 @@ import (
 
 	// external
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -26,106 +27,110 @@ func parseLambdaFunctionConfiguration(ctx context.Context, function types.Functi
 		svc1log.SafeParam("functionName", function.FunctionName),
 		svc1log.SafeParam("region", region))
 
-	if function.FunctionName == nil {
-		return nil, errors.New("function name is nil")
+	if aws.ToString(function.FunctionName) == "" || aws.ToString(function.FunctionArn) == "" || region == "" {
+		return nil, errors.New("function missing required name, ARN, or region")
 	}
-	if function.FunctionArn == nil {
-		return nil, errors.New("function arn is nil")
+	functionARN, err := arn.Parse(*function.FunctionArn)
+	if err != nil || functionARN.Partition == "" || functionARN.AccountID == "" || functionARN.Service != "lambda" ||
+		functionARN.Region != region || !strings.HasPrefix(functionARN.Resource, "function:") ||
+		strings.TrimPrefix(functionARN.Resource, "function:") == "" {
+		return nil, fmt.Errorf("invalid function ARN %q for region %s", *function.FunctionArn, region)
 	}
-	if function.Role == nil {
-		return nil, errors.New("function role is nil")
-	}
-	if function.RevisionId == nil {
-		return nil, errors.New("function revision id is nil")
-	}
-	if function.LastModified == nil {
-		return nil, errors.New("function LastModified is nil")
-	}
+	var parseErrors []error
 
-	lastModified, err := time.Parse("2006-01-02T15:04:05.000-0700", *function.LastModified)
-	if err != nil {
-		return nil, err
-	}
-
-	lambdaArchitectures := []lambdafern.LambdaArchitecture{}
-	for _, architecture := range function.Architectures {
-		architecture, err := lambdafern.NewLambdaArchitectureFromString(strings.ToUpper(string(architecture)))
+	var lastModified *time.Time
+	if aws.ToString(function.LastModified) != "" {
+		parsed, err := time.Parse("2006-01-02T15:04:05.999999999-0700", *function.LastModified)
 		if err != nil {
-			return nil, err
+			parsed, err = time.Parse(time.RFC3339Nano, *function.LastModified)
 		}
-		lambdaArchitectures = append(lambdaArchitectures, architecture)
+		if err != nil {
+			parseErrors = append(parseErrors, fmt.Errorf("invalid last modified timestamp: %w", err))
+		} else {
+			lastModified = &parsed
+		}
 	}
 
-	lambdaPackageType, err := lambdafern.NewLambdaPackageTypeFromString(strings.ToUpper(string(function.PackageType)))
-	if err != nil {
-		return nil, err
+	var lambdaArchitectures []lambdafern.LambdaArchitecture
+	for _, architecture := range function.Architectures {
+		parsed, err := lambdafern.NewLambdaArchitectureFromString(strings.ToUpper(string(architecture)))
+		if err != nil {
+			parseErrors = append(parseErrors, fmt.Errorf("unsupported architecture %q: %w", architecture, err))
+			continue
+		}
+		lambdaArchitectures = append(lambdaArchitectures, parsed)
+	}
+
+	var lambdaPackageType *lambdafern.LambdaPackageType
+	if function.PackageType != "" {
+		parsed, err := lambdafern.NewLambdaPackageTypeFromString(strings.ToUpper(string(function.PackageType)))
+		if err != nil {
+			parseErrors = append(parseErrors, fmt.Errorf("unsupported package type %q: %w", function.PackageType, err))
+		} else {
+			lambdaPackageType = &parsed
+		}
 	}
 
 	var vpcReference *common.VpcReference
-	if function.VpcConfig != nil && function.VpcConfig.VpcId != nil {
-		vpcReference = createVpcReference(*function.VpcConfig.VpcId, function.VpcConfig.SubnetIds, region)
-	}
-
 	var securityGroupIds []string
 	if function.VpcConfig != nil {
-		securityGroupIds = append(securityGroupIds, function.VpcConfig.SecurityGroupIds...)
+		vpcReference = createVpcReference(aws.ToString(function.VpcConfig.VpcId), function.VpcConfig.SubnetIds, region)
+		securityGroupIds = function.VpcConfig.SecurityGroupIds
+		if vpcReference == nil && (len(function.VpcConfig.SubnetIds) > 0 || len(securityGroupIds) > 0) {
+			parseErrors = append(parseErrors, errors.New("VPC configuration has subnet or security group entries but no VPC ID"))
+		}
 	}
 
 	var loggingConfig *lambdafern.LambdaLoggingConfig
-	if function.LoggingConfig != nil {
-		if function.LoggingConfig.LogGroup != nil {
-			logFormat, err := lambdafern.NewLambdaLoggingFormatFromString(strings.ToUpper(string(function.LoggingConfig.LogFormat)))
+	if function.LoggingConfig != nil && aws.ToString(function.LoggingConfig.LogGroup) != "" {
+		loggingConfig = &lambdafern.LambdaLoggingConfig{LogGroup: *function.LoggingConfig.LogGroup}
+		if function.LoggingConfig.LogFormat != "" {
+			parsed, err := lambdafern.NewLambdaLoggingFormatFromString(strings.ToUpper(string(function.LoggingConfig.LogFormat)))
 			if err != nil {
-				return nil, err
-			}
-			loggingConfig = &lambdafern.LambdaLoggingConfig{
-				LogFormat: logFormat,
-				LogGroup:  *function.LoggingConfig.LogGroup,
+				parseErrors = append(parseErrors, fmt.Errorf("unsupported log format %q: %w", function.LoggingConfig.LogFormat, err))
+			} else {
+				loggingConfig.LogFormat = &parsed
 			}
 		}
 	}
 
-	cloudWatchLogs, err := createCloudWatchLogReferences(
-		loggingConfig,
-		*function.FunctionName,
-		*function.FunctionArn,
-		region,
-	)
+	cloudWatchLogs, err := createCloudWatchLogReferences(loggingConfig, *function.FunctionArn, region)
 	if err != nil {
-		return nil, err
+		parseErrors = append(parseErrors, err)
 	}
 
-	// Handler can be nil for container-image-based Lambda functions
-	var handler string
-	if function.Handler != nil {
-		handler = *function.Handler
+	roleReference := createIamRoleReference(aws.ToString(function.Role), region)
+	if roleReference == nil {
+		parseErrors = append(parseErrors, fmt.Errorf("missing or invalid execution role ARN %q", aws.ToString(function.Role)))
 	}
 
-	var timeoutInSeconds int
+	var runtime *string
+	if function.Runtime != "" {
+		runtime = aws.String(string(function.Runtime))
+	}
+	var timeoutInSeconds *int
 	if function.Timeout != nil {
-		timeoutInSeconds = int(*function.Timeout)
+		timeoutInSeconds = aws.Int(int(*function.Timeout))
 	}
-
-	var memorySizeInMb int
+	var memorySizeInMb *int
 	if function.MemorySize != nil {
-		memorySizeInMb = int(*function.MemorySize)
+		memorySizeInMb = aws.Int(int(*function.MemorySize))
 	}
-
-	var ephemeralStorageInMb int
+	var ephemeralStorageInMb *int
 	if function.EphemeralStorage != nil && function.EphemeralStorage.Size != nil {
-		ephemeralStorageInMb = int(*function.EphemeralStorage.Size)
+		ephemeralStorageInMb = aws.Int(int(*function.EphemeralStorage.Size))
 	}
 
-	var result = &lambdafern.LambdaFunction{
+	result := &lambdafern.LambdaFunction{
 		Identification: &lambdafern.LambdaIdentificationInfo{
 			Name:   *function.FunctionName,
 			Arn:    *function.FunctionArn,
 			Region: region,
 		},
 		Configuration: &lambdafern.LambdaConfigurationInfo{
-			RevisionId:           *function.RevisionId,
-			Runtime:              string(function.Runtime),
-			Handler:              handler,
+			RevisionId:           function.RevisionId,
+			Runtime:              runtime,
+			Handler:              function.Handler,
 			CodeSizeInBytes:      function.CodeSize,
 			TimeoutInSeconds:     timeoutInSeconds,
 			MemorySizeInMb:       memorySizeInMb,
@@ -139,12 +144,12 @@ func parseLambdaFunctionConfiguration(ctx context.Context, function types.Functi
 		},
 		Resources: &lambdafern.LambdaResourceInfo{
 			Vpc:            vpcReference,
-			IamRole:        createIamRoleReference(*function.Role, region),
+			IamRole:        roleReference,
 			SecurityGroups: createSecurityGroupReferences(securityGroupIds, region),
 			CloudWatchLogs: cloudWatchLogs,
 		},
 	}
-	return result, nil
+	return result, errors.Join(parseErrors...)
 }
 
 func enumerateLambdaForRegion(ctx context.Context, awsConfig aws.Config, region string) ([]*lambdafern.LambdaFunction, []error) {
@@ -165,16 +170,17 @@ func enumerateLambdaForRegion(ctx context.Context, awsConfig aws.Config, region 
 			log.Error("Failed to get next page of Lambda functions",
 				svc1log.SafeParam("region", region),
 				svc1log.Stacktrace(err))
-			// failed to page so just return an empty list and the error with region context
 			wrappedErr := fmt.Errorf("region %s: %w", region, err)
-			return []*lambdafern.LambdaFunction{}, append(errors, wrappedErr)
+			return functions, append(errors, wrappedErr)
 		}
 		for _, function := range page.Functions {
 			parsedFunction, err := parseLambdaFunctionConfiguration(ctx, function, region)
 			if err != nil {
-				wrappedErr := fmt.Errorf("region %s: %w", region, err)
+				wrappedErr := fmt.Errorf("function %s (%s) in region %s: %w",
+					aws.ToString(function.FunctionName), aws.ToString(function.FunctionArn), region, err)
 				errors = append(errors, wrappedErr)
-			} else {
+			}
+			if parsedFunction != nil {
 				functions = append(functions, parsedFunction)
 			}
 		}
@@ -220,15 +226,23 @@ func createVpcReference(vpcID string, subnetIds []string, region string) *common
 		return nil
 	}
 
+	var validSubnetIDs []string
+	for _, subnetID := range subnetIds {
+		if subnetID != "" {
+			validSubnetIDs = append(validSubnetIDs, subnetID)
+		}
+	}
 	return &common.VpcReference{
 		Id:        vpcID,
 		Region:    region,
-		SubnetIds: subnetIds,
+		SubnetIds: validSubnetIDs,
 	}
 }
 
 func createIamRoleReference(roleArn, region string) *common.IamRoleReference {
-	if roleArn == "" {
+	parsed, err := arn.Parse(roleArn)
+	if err != nil || parsed.Partition == "" || parsed.AccountID == "" || parsed.Service != "iam" || parsed.Region != "" ||
+		!strings.HasPrefix(parsed.Resource, "role/") || strings.HasSuffix(parsed.Resource, "/") {
 		return nil
 	}
 
@@ -270,14 +284,13 @@ func createSecurityGroupReferences(sgIDs []string, region string) []*common.Secu
 
 func createCloudWatchLogReferences(
 	loggingConfig *lambdafern.LambdaLoggingConfig,
-	functionName string,
 	functionARN string,
 	region string,
 ) ([]*common.CloudWatchLogReference, error) {
-	logGroupName := "/aws/lambda/" + functionName
-	if loggingConfig != nil {
-		logGroupName = loggingConfig.LogGroup
+	if loggingConfig == nil || loggingConfig.LogGroup == "" {
+		return nil, nil
 	}
+	logGroupName := loggingConfig.LogGroup
 
 	logGroupARN, err := utils.BuildRelatedARN(functionARN, "logs", region, "log-group:"+logGroupName)
 	if err != nil {

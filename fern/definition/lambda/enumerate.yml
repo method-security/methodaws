@@ -22,7 +22,7 @@ types:
       - JSON
   LambdaLoggingConfig:
     properties:
-      logFormat: LambdaLoggingFormat
+      logFormat: optional<LambdaLoggingFormat>
       logGroup: string
 # Lambda High level structs
   LambdaIdentificationInfo:
@@ -32,15 +32,15 @@ types:
       region: string
   LambdaConfigurationInfo:
     properties:
-      revisionId: string
-      runtime: string
-      handler: string
+      revisionId: optional<string>
+      runtime: optional<string>
+      handler: optional<string>
       codeSizeInBytes: long
-      timeoutInSeconds: integer
-      memorySizeInMb: integer
-      ephemeralStorageInMb: integer
-      lastModified: datetime
-      packageType: LambdaPackageType
+      timeoutInSeconds: optional<integer>
+      memorySizeInMb: optional<integer>
+      ephemeralStorageInMb: optional<integer>
+      lastModified: optional<datetime>
+      packageType: optional<LambdaPackageType>
       description: optional<string>
       codeSha256: optional<string>
       architectures: optional<list<LambdaArchitecture>>
@@ -50,6 +50,7 @@ types:
       vpc: optional<common.VpcReference>
       iamRole: optional<common.IamRoleReference>
       securityGroups: optional<list<common.SecurityGroupReference>>
+      # Configured destinations, not proof of log group existence or successful delivery.
       cloudWatchLogs: optional<list<common.CloudWatchLogReference>>
 # Lambda Main Structs
   LambdaFunction:
