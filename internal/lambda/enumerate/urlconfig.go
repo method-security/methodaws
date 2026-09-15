@@ -55,7 +55,10 @@ func enrichFunctionURLs(ctx context.Context, client *lambda.Client, function *la
 				}
 			}
 			entry.ResourcePolicy = document
-			function.Configuration.FunctionUrls = append(function.Configuration.FunctionUrls, entry)
+			if function.Resources == nil {
+				function.Resources = &lambdafern.LambdaResourceInfo{}
+			}
+			function.Resources.FunctionUrls = append(function.Resources.FunctionUrls, entry)
 		}
 	}
 	return errs

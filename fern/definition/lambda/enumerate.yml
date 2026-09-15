@@ -60,9 +60,9 @@ types:
       loggingConfig: optional<LambdaLoggingConfig>
       # Resource-based policy for the unqualified parent function.
       resourcePolicy: optional<string>
-      functionUrls: optional<list<LambdaFunctionUrlConfig>>
   LambdaResourceInfo:
     properties:
+      functionUrls: optional<list<LambdaFunctionUrlConfig>>
       vpc: optional<common.VpcReference>
       iamRole: optional<common.IamRoleReference>
       securityGroups: optional<list<common.SecurityGroupReference>>
