@@ -1,3 +1,5 @@
+imports:
+  common: ../common/resources.yml
 types:
 # Config
   CloudFrontEnumerateConfig:
@@ -13,12 +15,32 @@ types:
       - S3
       - EC2
       - APPLICATION_LOAD_BALANCER
+      - NETWORK_LOAD_BALANCER
+      - LOAD_BALANCER
       - VPC_ORIGIN
       - API_GATEWAY
       - UNKNOWN
+# Optional backend links; each variant requires its actual resource identity.
+  S3OriginBackend:
+    properties:
+      bucketName: string
+  Ec2OriginBackend:
+    properties:
+      arn: string
+  ApiGatewayOriginBackend:
+    properties:
+      id: string
+      region: string
+  CloudFrontOriginBackend:
+    union:
+      s3: S3OriginBackend
+      ec2: Ec2OriginBackend
+      load_balancer: common.LoadBalancerReference
+      api_gateway: ApiGatewayOriginBackend
 # Origin High level Structs
   CloudFrontDistributionOriginIdentificationInfo:
     properties:
+      # Native origin ID, scoped to the containing distribution ARN, not a backend ID.
       id: string
       domainName: optional<string>
   CloudFrontDistributionOriginConfigurationInfo:
@@ -33,6 +55,7 @@ types:
     properties:
       identification: CloudFrontDistributionOriginIdentificationInfo
       configuration: CloudFrontDistributionOriginConfigurationInfo
+      backend: optional<CloudFrontOriginBackend>
 # CloudFront Distribution High level Structs
   CloudFrontDistributionIdentificationInfo:
     properties:
