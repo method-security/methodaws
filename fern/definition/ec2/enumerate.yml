@@ -16,20 +16,6 @@ types:
       - TERMINATED
       - STOPPING
       - STOPPED
-  InstanceType:
-    enum:
-      - T2_NANO
-      - T2_MICRO
-      - T2_SMALL
-      - T2_MEDIUM
-      - T2_LARGE
-      - T3_NANO
-      - T3_MICRO
-      - T3_SMALL
-      - T3_MEDIUM
-      - T3_LARGE
-      - M5_LARGE
-      - M5_XLARGE
   PlatformValues:
     enum:
       - WINDOWS
@@ -110,7 +96,7 @@ types:
       state: optional<InstanceState>
       imageId: optional<string>
       keyName: optional<string>
-      instanceType: optional<InstanceType>
+      instanceType: optional<string>
       launchTime: optional<datetime>
       placement: optional<Placement>
       architecture: optional<Architecture>

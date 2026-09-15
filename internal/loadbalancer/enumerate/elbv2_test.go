@@ -13,11 +13,13 @@ import (
 )
 
 type stubELBV2ResourceClient struct {
-	targetGroupInput *elasticloadbalancingv2.DescribeTargetGroupsInput
-	certificatePages []*elasticloadbalancingv2.DescribeListenerCertificatesOutput
-	targetHealth     *elasticloadbalancingv2.DescribeTargetHealthOutput
-	listenerOutput   *elasticloadbalancingv2.DescribeListenersOutput
-	certificateErr   error
+	targetGroupInput  *elasticloadbalancingv2.DescribeTargetGroupsInput
+	targetGroupOutput *elasticloadbalancingv2.DescribeTargetGroupsOutput
+	certificatePages  []*elasticloadbalancingv2.DescribeListenerCertificatesOutput
+	targetHealth      *elasticloadbalancingv2.DescribeTargetHealthOutput
+	targetHealthErr   error
+	listenerOutput    *elasticloadbalancingv2.DescribeListenersOutput
+	certificateErr    error
 }
 
 func (s *stubELBV2ResourceClient) DescribeListeners(
@@ -53,8 +55,8 @@ func TestListenerRetainsDefaultCertificateWhenCertificateListingFails(t *testing
 			Certificates: []elbv2types.Certificate{{
 				CertificateArn: aws.String("default-certificate"),
 				IsDefault:      aws.Bool(true),
-			}},
-		}}},
+			}}},
+		}},
 		certificateErr: errors.New("certificate listing denied"),
 	}
 
@@ -99,6 +101,9 @@ func (s *stubELBV2ResourceClient) DescribeTargetGroups(
 	_ ...func(*elasticloadbalancingv2.Options),
 ) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error) {
 	s.targetGroupInput = input
+	if s.targetGroupOutput != nil {
+		return s.targetGroupOutput, nil
+	}
 	return &elasticloadbalancingv2.DescribeTargetGroupsOutput{}, nil
 }
 
@@ -107,7 +112,7 @@ func (s *stubELBV2ResourceClient) DescribeTargetHealth(
 	*elasticloadbalancingv2.DescribeTargetHealthInput,
 	...func(*elasticloadbalancingv2.Options),
 ) (*elasticloadbalancingv2.DescribeTargetHealthOutput, error) {
-	return s.targetHealth, nil
+	return s.targetHealth, s.targetHealthErr
 }
 
 func TestTargetGroupsUseLoadBalancerFilter(t *testing.T) {
@@ -151,4 +156,27 @@ func TestTargetPortRemainsUnsetWhenAWSOmitsIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, targets, 1)
 	assert.Nil(t, targets[0].Port)
+}
+
+func TestTargetGroupIsRetainedWhenTargetHealthIsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	client := &stubELBV2ResourceClient{
+		targetGroupOutput: &elasticloadbalancingv2.DescribeTargetGroupsOutput{TargetGroups: []elbv2types.TargetGroup{{
+			TargetGroupArn:  aws.String("arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/example/id"),
+			TargetGroupName: aws.String("example"),
+		}}},
+		targetHealthErr: errors.New("target health denied"),
+	}
+	lbARN := "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/example/id"
+
+	targetGroups, errs := targetGroupForLoadBalancerV2(context.Background(), client, &lbARN, "us-east-1")
+
+	require.Equal(t, []string{"target health denied"}, errs)
+	require.Len(t, targetGroups, 1)
+	assert.Equal(t,
+		"arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/example/id",
+		targetGroups[0].Identification.Arn,
+	)
+	assert.Nil(t, targetGroups[0].Resources)
 }

@@ -53,3 +53,12 @@ func TestConvertNetworkInterfacesIncludesEveryPrivateIPAddress(t *testing.T) {
 	assert.True(t, aws.ToBool(interfaces[0].Configuration.PrivateIpAddresses[0].Primary))
 	assert.Equal(t, "10.0.0.11", interfaces[0].Configuration.PrivateIpAddresses[1].PrivateIpAddress)
 }
+
+func TestConvertInstanceTypePreservesAWSValue(t *testing.T) {
+	t.Parallel()
+
+	instanceType := types.InstanceType("m8g.48xlarge")
+
+	assert.Equal(t, "m8g.48xlarge", aws.ToString(convertInstanceType(instanceType)))
+	assert.Nil(t, convertInstanceType(""))
+}

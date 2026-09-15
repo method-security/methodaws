@@ -60,9 +60,9 @@ types:
       region: string
   S3BucketConfigurationInfo:
     properties:
-      creationDate: datetime
-      ownerID: string
-      ownerName: string
+      creationDate: optional<datetime>
+      ownerID: optional<string>
+      ownerName: optional<string>
       policy: optional<string>
       bucketVersioning: optional<BucketVersioningStatus>
       mfaDelete: optional<S3MFADeleteStatus>

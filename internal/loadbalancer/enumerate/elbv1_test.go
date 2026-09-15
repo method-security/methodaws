@@ -24,3 +24,27 @@ func TestClassicTargetPortRequiresOneUnambiguousBackendPort(t *testing.T) {
 	require.Len(t, targets, 1)
 	assert.Nil(t, targets[0].Port)
 }
+
+func TestClassicLoadBalancerUsesAuthoritativeARNAndOptionalListenerARN(t *testing.T) {
+	t.Parallel()
+
+	loadBalancer := types.LoadBalancerDescription{
+		LoadBalancerName: aws.String("example"),
+		ListenerDescriptions: []types.ListenerDescription{{
+			Listener: &types.Listener{LoadBalancerPort: 443},
+		}},
+	}
+
+	identification, err := classicLoadBalancerIdentification(loadBalancer, "us-gov-west-1", "123456789012")
+	require.NoError(t, err)
+	assert.Equal(t,
+		"arn:aws-us-gov:elasticloadbalancing:us-gov-west-1:123456789012:loadbalancer/example",
+		aws.ToString(identification.Arn),
+	)
+
+	listeners, errs := listenersForLoadBalancerV1(loadBalancer)
+	require.Empty(t, errs)
+	require.Len(t, listeners, 1)
+	assert.Nil(t, listeners[0].Arn)
+	assert.Equal(t, 443, aws.ToInt(listeners[0].Port))
+}

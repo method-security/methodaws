@@ -81,8 +81,8 @@ types:
     properties:
       uri: string
       vpcLinkId: string
-      loadBalancerArn: string
-      loadBalancerArns: list<string>
+      loadBalancerArn: optional<string>
+      loadBalancerArns: optional<list<string>>
       listenerArn: optional<string>
       dnsName: optional<string>
   ServiceDiscoveryBackend:
@@ -164,7 +164,7 @@ types:
     properties:
       version: ApiGatewayVersion
       description: optional<string>
-      stage: optional<string>
+      stages: optional<list<string>>
       accessLogSettings: optional<AccessLogSettings>
       corsConfiguration: optional<CorsConfiguration>
       clientCertificateId: optional<string>

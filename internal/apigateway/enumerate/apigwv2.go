@@ -3,6 +3,7 @@ package apigateway
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
@@ -143,13 +144,10 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	if err != nil {
 		errors = append(errors, err.Error())
 	}
-	primaryStageName := primaryHTTPAPIStage(stages)
+	stageNames := httpAPIStageNames(stages)
 
-	// Get access log settings
-	accessLogSettings, err := getHTTPAPIAccessLogSettings(ctx, client, *api.ApiId)
-	if err != nil {
-		errors = append(errors, err.Error())
-	}
+	// Access log settings are included in the stage response already collected above.
+	accessLogSettings := accessLogSettingsFromHTTPAPIStages(stages)
 	// Perform security analysis
 	securityAnalysis := analyzeAPISecurity(routes, certificates, accessLogSettings, corsConfig, nil) // V2 doesn't use API keys the same way
 
@@ -169,7 +167,7 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	configuration := &apigatewayfern.ApiGatewayConfigurationInfo{
 		Version:           apigatewayfern.ApiGatewayVersionV2,
 		Description:       api.Description,
-		Stage:             primaryStageName,
+		Stages:            stageNames,
 		AccessLogSettings: accessLogSettings,
 		CorsConfiguration: corsConfig,
 		Certificates:      certificates,
@@ -191,13 +189,21 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	return apiGatewayInstance, errors
 }
 
-func primaryHTTPAPIStage(stages []types.Stage) *string {
+func httpAPIStageNames(stages []types.Stage) []string {
+	stageNames := make([]string, 0, len(stages))
+	seen := make(map[string]struct{}, len(stages))
 	for _, stage := range stages {
-		if stage.StageName != nil && *stage.StageName != "$default" {
-			return stage.StageName
+		if stage.StageName == nil || *stage.StageName == "" {
+			continue
 		}
+		if _, ok := seen[*stage.StageName]; ok {
+			continue
+		}
+		seen[*stage.StageName] = struct{}{}
+		stageNames = append(stageNames, *stage.StageName)
 	}
-	return nil
+	sort.Strings(stageNames)
+	return stageNames
 }
 
 // getHTTPAPIRoutes retrieves routes for an HTTP API
@@ -443,7 +449,7 @@ func createV2VpcLinkBackend(integration *apigatewayv2.GetIntegrationOutput) (*ap
 			LoadBalancer: &apigatewayfern.LoadBalancerBackend{
 				Uri:              uri,
 				VpcLinkId:        connectionID,
-				LoadBalancerArn:  loadBalancerARNString,
+				LoadBalancerArn:  &loadBalancerARNString,
 				LoadBalancerArns: []string{loadBalancerARNString},
 				ListenerArn:      &listenerARN,
 			},
@@ -525,18 +531,21 @@ func getHTTPAPICertificates(ctx context.Context, client httpAPICertificateAPI, a
 // getHTTPAPIAccessLogSettings retrieves access log configuration
 func getHTTPAPIAccessLogSettings(ctx context.Context, client getStagesAPI, apiID string) (*apigatewayfern.AccessLogSettings, error) {
 	stages, err := getAllHTTPAPIStages(ctx, client, apiID)
+	return accessLogSettingsFromHTTPAPIStages(stages), err
+}
 
+func accessLogSettingsFromHTTPAPIStages(stages []types.Stage) *apigatewayfern.AccessLogSettings {
 	// Look for access log settings in any stage (typically $default)
 	for _, stage := range stages {
 		if stage.AccessLogSettings != nil && stage.AccessLogSettings.DestinationArn != nil {
 			return &apigatewayfern.AccessLogSettings{
 				DestinationArn: *stage.AccessLogSettings.DestinationArn,
 				Format:         stage.AccessLogSettings.Format,
-			}, err
+			}
 		}
 	}
 
-	return nil, err
+	return nil
 }
 
 type getStagesAPI interface {

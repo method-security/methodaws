@@ -37,7 +37,10 @@ func fetchSecurityGroupRules(ctx context.Context, cfg aws.Config, groupID string
 	for paginator.HasMorePages() {
 		output, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, err
+			return allRules, err
+		}
+		if output == nil {
+			return allRules, fmt.Errorf("DescribeSecurityGroupRules returned no response for security group %s", groupID)
 		}
 		allRules = append(allRules, output.SecurityGroupRules...)
 	}
@@ -201,13 +204,13 @@ func convertAWSEC2SecurityGroupToFern(ctx context.Context, cfg aws.Config, awsSG
 	var detailedRules []ec2types.SecurityGroupRule
 	cfg.Region = region
 	rules, err := fetchSecurityGroupRules(ctx, cfg, *awsSG.GroupId)
+	detailedRules = rules
 	if err != nil {
 		log.Warn("Failed to fetch detailed security group rules",
 			svc1log.SafeParam("groupId", *awsSG.GroupId),
 			svc1log.SafeParam("region", region),
 			svc1log.Stacktrace(err))
-	} else {
-		detailedRules = rules
+		errors = append(errors, fmt.Sprintf("failed to fetch detailed rules for security group %s: %v", *awsSG.GroupId, err))
 	}
 
 	// Convert SecurityGroupRules directly to fernsecuritygroup.IpPermission

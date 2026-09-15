@@ -2,6 +2,7 @@ package apigateway
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,6 +14,7 @@ import (
 
 type stubVpcLinkClient struct {
 	output *awsgateway.GetVpcLinkOutput
+	err    error
 	calls  int
 }
 
@@ -22,7 +24,7 @@ func (s *stubVpcLinkClient) GetVpcLink(
 	...func(*awsgateway.Options),
 ) (*awsgateway.GetVpcLinkOutput, error) {
 	s.calls++
-	return s.output, nil
+	return s.output, s.err
 }
 
 func TestConvertV1VpcLinkResolvesLoadBalancerTargets(t *testing.T) {
@@ -43,11 +45,52 @@ func TestConvertV1VpcLinkResolvesLoadBalancerTargets(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, converted.VpcLink.Backend.LoadBalancer)
 	backend := converted.VpcLink.Backend.LoadBalancer
-	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/example/abc", backend.LoadBalancerArn)
-	assert.Equal(t, backend.LoadBalancerArns, []string{backend.LoadBalancerArn})
+	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/example/abc", aws.ToString(backend.LoadBalancerArn))
+	assert.Equal(t, []string{aws.ToString(backend.LoadBalancerArn)}, backend.LoadBalancerArns)
 	assert.Nil(t, backend.DnsName)
 
 	_, err = convertV1Integration(context.Background(), client, cache, integration, "us-east-1")
 	require.NoError(t, err)
 	assert.Equal(t, 1, client.calls)
+}
+
+func TestConvertV1VpcLinkRetainsIntegrationWhenTargetLookupFails(t *testing.T) {
+	t.Parallel()
+
+	client := &stubVpcLinkClient{err: errors.New("VPC Link lookup denied")}
+	integration := &types.Integration{
+		Type:           types.IntegrationTypeHttpProxy,
+		ConnectionType: types.ConnectionTypeVpcLink,
+		ConnectionId:   aws.String("vpclink-123"),
+		Uri:            aws.String("https://internal.example.invalid"),
+	}
+
+	converted, err := convertV1Integration(context.Background(), client, make(map[string][]string), integration, "us-east-1")
+
+	require.EqualError(t, err, "get VPC Link vpclink-123: VPC Link lookup denied")
+	require.NotNil(t, converted)
+	require.NotNil(t, converted.VpcLink.Backend.LoadBalancer)
+	backend := converted.VpcLink.Backend.LoadBalancer
+	assert.Equal(t, "https://internal.example.invalid", backend.Uri)
+	assert.Equal(t, "vpclink-123", backend.VpcLinkId)
+	assert.Nil(t, backend.LoadBalancerArn)
+	assert.Nil(t, backend.LoadBalancerArns)
+}
+
+func TestConvertV1VpcLinkRejectsEmptyCachedTargetsWithoutPanicking(t *testing.T) {
+	t.Parallel()
+
+	cache := map[string][]string{"vpclink-123": {}}
+	integration := &types.Integration{
+		Type:           types.IntegrationTypeHttp,
+		ConnectionType: types.ConnectionTypeVpcLink,
+		ConnectionId:   aws.String("vpclink-123"),
+		Uri:            aws.String("https://internal.example.invalid"),
+	}
+
+	converted, err := convertV1Integration(context.Background(), &stubVpcLinkClient{}, cache, integration, "us-east-1")
+
+	require.EqualError(t, err, "VPC Link vpclink-123 has no target ARNs")
+	require.NotNil(t, converted)
+	assert.Equal(t, "vpclink-123", converted.VpcLink.Backend.LoadBalancer.VpcLinkId)
 }

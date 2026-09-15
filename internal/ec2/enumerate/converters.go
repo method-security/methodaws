@@ -97,14 +97,13 @@ func convertInstanceState(state types.InstanceStateName) *ec2.InstanceState {
 	return &fernState
 }
 
-// convertInstanceType converts AWS instance type to Fern enum
-func convertInstanceType(instanceType types.InstanceType) *ec2.InstanceType {
+// convertInstanceType preserves AWS instance types that may be newer than this CLI.
+func convertInstanceType(instanceType types.InstanceType) *string {
 	if instanceType == "" {
 		return nil
 	}
-	typeStr := strings.ToUpper(strings.ReplaceAll(string(instanceType), ".", "_"))
-	fernType := ec2.InstanceType(typeStr)
-	return &fernType
+	typeName := string(instanceType)
+	return &typeName
 }
 
 // convertArchitecture converts AWS architecture to Fern enum

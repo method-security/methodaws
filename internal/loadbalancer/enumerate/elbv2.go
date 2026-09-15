@@ -200,7 +200,7 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 				}
 			}
 			fernListener := &loadbalancerfern.Listener{
-				Arn:          *listener.ListenerArn,
+				Arn:          listener.ListenerArn,
 				Port:         port,
 				Certificates: certificates,
 			}
@@ -313,7 +313,6 @@ func targetGroupForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, 
 			targets, err := targetsForTargetGroupV2(ctx, client, awsTargetGroup)
 			if err != nil {
 				errorMessages = append(errorMessages, err.Error())
-				continue
 			}
 
 			// Create TargetGroupInstance

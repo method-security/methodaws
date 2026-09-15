@@ -58,7 +58,7 @@ types:
       isDefault: boolean
   Listener:
     properties:
-      arn: string
+      arn: optional<string>
       protocol: optional<Protocol>
       port: optional<integer>
       certificates: optional<list<Certificate>>
@@ -92,8 +92,8 @@ types:
 # LoadBalancer High level structs
   LoadBalancerIdentificationInfo:
     properties:
-      arn: optional<string> # Only for ELB v2
-      name: optional<string> # Needed for ELB v1
+      arn: optional<string>
+      name: optional<string>
       region: string
   LoadBalancerConfigurationInfo:
     properties:

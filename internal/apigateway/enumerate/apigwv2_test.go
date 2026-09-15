@@ -103,7 +103,7 @@ func TestHTTPAPICallersUsePagesCollectedBeforeFailure(t *testing.T) {
 
 	stages, stageErr := getAllHTTPAPIStages(context.Background(), client, "api-id")
 	require.Error(t, stageErr)
-	assert.Equal(t, "prod", aws.ToString(primaryHTTPAPIStage(stages)))
+	assert.Equal(t, []string{"prod"}, httpAPIStageNames(stages))
 
 	settings, settingsErr := getHTTPAPIAccessLogSettings(context.Background(), &stubAPIGatewayV2PaginationClient{
 		stageOutputs: []*apigatewayv2.GetStagesOutput{
@@ -118,6 +118,19 @@ func TestHTTPAPICallersUsePagesCollectedBeforeFailure(t *testing.T) {
 	require.Len(t, certificateErrors, 1)
 	require.Len(t, certificates, 1)
 	assert.Equal(t, "arn:aws:acm:us-east-1:123456789012:certificate/example", certificates[0].Arn)
+}
+
+func TestHTTPAPIStageNamesIncludeDefaultAndAreStable(t *testing.T) {
+	t.Parallel()
+
+	stages := []types.Stage{
+		{StageName: aws.String("prod")},
+		{StageName: aws.String("$default")},
+		{StageName: aws.String("prod")},
+		{},
+	}
+
+	assert.Equal(t, []string{"$default", "prod"}, httpAPIStageNames(stages))
 }
 
 func TestHTTPAPIPaginationHelpersCollectEveryPage(t *testing.T) {
@@ -180,7 +193,7 @@ func TestConvertV2VpcLinkDerivesLoadBalancerFromListener(t *testing.T) {
 	assert.Equal(t, listenerARN, aws.ToString(backend.LoadBalancer.ListenerArn))
 	assert.Equal(t,
 		"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/example/abc",
-		backend.LoadBalancer.LoadBalancerArn,
+		aws.ToString(backend.LoadBalancer.LoadBalancerArn),
 	)
 	assert.Nil(t, backend.LoadBalancer.DnsName)
 }
