@@ -104,9 +104,8 @@ types:
       selector: optional<map<string, string>>
   KubernetesServiceResourceInfo:
     properties:
-      targetPods:
-        type: optional<list<KubernetesPodIdentificationInfo>>
-        docs: Pods selected in this service's namespace, not a statement of endpoint readiness.
+      # Pods selected in this service's namespace, not a statement of endpoint readiness.
+      targetPods: optional<list<KubernetesPodIdentificationInfo>>
       clusterIpAddress: optional<string>
       externalIpAddresses: optional<list<string>>
       externalEndpoints: optional<list<ServiceEndpoint>>
