@@ -47,12 +47,13 @@ func TestNormalizeBucketRegion(t *testing.T) {
 	assert.Equal(t, "ap-south-2", normalizeBucketRegion(types.BucketLocationConstraint("ap-south-2")))
 }
 
-func TestAccountPublicAccessBlockRegion(t *testing.T) {
+func TestS3RequestRegion(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "us-gov-west-1", accountPublicAccessBlockRegion("us-gov-west-1", []string{"us-gov-east-1"}))
-	assert.Equal(t, "cn-north-1", accountPublicAccessBlockRegion("", []string{"cn-north-1", "cn-northwest-1"}))
-	assert.Empty(t, accountPublicAccessBlockRegion("", nil))
+	assert.Equal(t, "us-gov-east-1", s3RequestRegion("us-east-1", []string{"us-gov-east-1"}))
+	assert.Equal(t, "cn-north-1", s3RequestRegion("", []string{"cn-north-1", "cn-northwest-1"}))
+	assert.Equal(t, "eu-west-1", s3RequestRegion("eu-west-1", nil))
+	assert.Empty(t, s3RequestRegion("", nil))
 }
 
 func TestKmsKeyReferenceRejectsIdentifiersThatAreNotKeyARNs(t *testing.T) {

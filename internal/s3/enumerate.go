@@ -284,7 +284,13 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	//
 	// The region field in the final signal output will always explicitly state the correct region,
 	// regardless of whether the LocationConstraint is empty or not.
-	client := s3.NewFromConfig(awscfg)
+	initialS3Config := awscfg.Copy()
+	initialS3Config.Region = s3RequestRegion(initialS3Config.Region, config.Regions)
+	if initialS3Config.Region == "" {
+		report.Errors = []string{"list S3 buckets: AWS region is unavailable"}
+		return report
+	}
+	client := s3.NewFromConfig(initialS3Config)
 
 	log.Info("Listing S3 buckets", svc1log.SafeParam("accountId", aws.ToString(&config.AccountId)))
 	listBucketsOutput, err := listBuckets(ctx, client)
@@ -300,7 +306,7 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	}
 
 	accountPABConfig := awscfg.Copy()
-	accountPABConfig.Region = accountPublicAccessBlockRegion(accountPABConfig.Region, config.Regions)
+	accountPABConfig.Region = s3RequestRegion(accountPABConfig.Region, config.Regions)
 	accountPAB := publicAccessBlockState{}
 	if accountPABConfig.Region == "" {
 		errors = append(errors, "get account Public Access Block: AWS region is unavailable")
@@ -473,14 +479,11 @@ func listBuckets(ctx context.Context, client listBucketsAPI) (*s3.ListBucketsOut
 	}
 }
 
-func accountPublicAccessBlockRegion(configRegion string, regions []string) string {
-	if configRegion != "" {
-		return configRegion
-	}
+func s3RequestRegion(configRegion string, regions []string) string {
 	if len(regions) > 0 {
 		return regions[0]
 	}
-	return ""
+	return configRegion
 }
 
 func normalizeBucketRegion(location types.BucketLocationConstraint) string {
