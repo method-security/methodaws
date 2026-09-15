@@ -27,8 +27,8 @@ func extractDistributionStatus(enabled bool) cloudfrontfern.CloudFrontDistributi
 }
 
 func transformDistributionToFern(ctx context.Context, awsConfig aws.Config, dist types.Distribution, accountID string) (*cloudfrontfern.CloudFrontDistribution, []string) {
-	if dist.ARN == nil {
-		return nil, []string{"Distribution ARN is nil"}
+	if aws.ToString(dist.ARN) == "" {
+		return nil, []string{"Distribution ARN is empty"}
 	}
 	if dist.DistributionConfig == nil {
 		return nil, []string{"Distribution configuration is nil"}
@@ -66,8 +66,8 @@ func transformDistributionToFern(ctx context.Context, awsConfig aws.Config, dist
 
 // Fallback transformation for when we only have DistributionSummary
 func transformDistributionSummaryToFern(ctx context.Context, awsConfig aws.Config, dist types.DistributionSummary, accountID string) (*cloudfrontfern.CloudFrontDistribution, []string) {
-	if dist.ARN == nil {
-		return nil, []string{"Distribution ARN is nil"}
+	if aws.ToString(dist.ARN) == "" {
+		return nil, []string{"Distribution ARN is empty"}
 	}
 	if dist.Enabled == nil {
 		return nil, []string{"Distribution Enabled is nil"}
