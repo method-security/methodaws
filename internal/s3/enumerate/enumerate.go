@@ -1,5 +1,5 @@
-// Package s3 provides the data structures and logic necessary to enumerate and integrate AWS S3 resources.
-package s3
+// Package enumerate provides the data structures and logic necessary to enumerate and integrate AWS S3 resources.
+package enumerate
 
 import (
 	// Standard

@@ -1,4 +1,5 @@
-package s3
+// Package list provides S3 bucket object listing.
+package list
 
 import (
 	// Standard
