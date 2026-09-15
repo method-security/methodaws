@@ -120,7 +120,7 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 	}
 
 	// Get resources and methods with security info
-	routes, routeErrors := getRestAPIRoutes(ctx, client, *api.Id, region)
+	routes, routesComplete, routeErrors := getRestAPIRoutes(ctx, client, *api.Id, region)
 	errors = append(errors, routeErrors...)
 
 	// Get endpoint configuration (not used in simplified version)
@@ -160,7 +160,7 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 
 	// Perform security analysis
 	securityAnalysis := analyzeAPISecurity(routes, certificates, accessLogSettings, nil)
-	if securityAnalysis != nil && len(routeErrors) > 0 && !aws.ToBool(securityAnalysis.ApiKeysRequired) {
+	if securityAnalysis != nil && !routesComplete && !aws.ToBool(securityAnalysis.ApiKeysRequired) {
 		securityAnalysis.ApiKeysRequired = nil
 	}
 	if securityAnalysis != nil && (len(stages) != 1 || len(stageNames) != 1) {
@@ -202,10 +202,12 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 }
 
 // getRestAPIRoutes retrieves routes/paths for a REST API
-func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, region string) ([]*apigatewayfern.Route, []string) {
+func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, region string) ([]*apigatewayfern.Route, bool, []string) {
 	log := svc1log.FromContext(ctx)
 	var routes []*apigatewayfern.Route
 	var errors []string
+	// Optional integration enrichment errors do not hide method-level API key requirements.
+	routesComplete := true
 	vpcLinkTargets := make(map[string][]string)
 
 	// Paginate through all resources
@@ -219,6 +221,7 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 				svc1log.SafeParam("apiId", apiID),
 				svc1log.Stacktrace(err))
 			errors = append(errors, fmt.Sprintf("GetResources failed for API %s: %s", apiID, err.Error()))
+			routesComplete = false
 			break
 		}
 		allResources = append(allResources, page.Items...)
@@ -227,6 +230,7 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 	for _, resource := range allResources {
 		if resource.Id == nil || resource.Path == nil {
 			errors = append(errors, fmt.Sprintf("Resource ID or path is missing for API %s", apiID))
+			routesComplete = false
 			continue
 		}
 		for methodName := range resource.ResourceMethods {
@@ -249,10 +253,12 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 					svc1log.Stacktrace(err))
 				errors = append(errors, fmt.Sprintf("GetMethod failed for API %s, resource %s (%s), method %s: %s",
 					apiID, resourcePath, *resource.Id, methodName, err.Error()))
+				routesComplete = false
 				continue
 			}
 			if method == nil {
 				errors = append(errors, fmt.Sprintf("GetMethod returned no response for API %s, resource %s", apiID, *resource.Id))
+				routesComplete = false
 				continue
 			}
 
@@ -337,7 +343,7 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 		}
 	}
 
-	return routes, errors
+	return routes, routesComplete, errors
 }
 
 // convertV1Integration converts AWS API Gateway integration to Fern Integration with backend structure
