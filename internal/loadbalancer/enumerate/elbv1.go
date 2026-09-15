@@ -3,6 +3,7 @@ package loadbalancer
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Method-Security/methodaws/generated/go/common"
@@ -62,15 +63,10 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 		}
 
 		for _, lb := range page.LoadBalancerDescriptions {
-			if lb.LoadBalancerName == nil {
-				log.Warn("LoadBalancer name is nil for load balancer", svc1log.SafeParam("loadBalancer", lb))
-				errorMessages = append(errorMessages, "LoadBalancer name is nil")
-				continue
-			}
-
 			identification, err := classicLoadBalancerIdentification(lb, region, accountID)
 			if err != nil {
-				errorMessages = append(errorMessages, err.Error())
+				errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %q in region %s: %s", aws.ToString(lb.LoadBalancerName), region, err))
+				continue
 			}
 
 			// Create configuration info
@@ -81,15 +77,23 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 				HostedZoneId:     lb.CanonicalHostedZoneNameID,
 			}
 
+			if aws.ToString(lb.Scheme) != "" {
+				if scheme, err := loadbalancerfern.NewLoadBalancerSchemeFromString(strings.ToUpper(strings.ReplaceAll(*lb.Scheme, "-", "_"))); err == nil {
+					configuration.Scheme = &scheme
+				} else {
+					errorMessages = append(errorMessages, fmt.Sprintf("Failed to convert load balancer scheme for %s in region %s: %s", identification.Arn, region, err.Error()))
+				}
+			}
+
 			// Get targets and listeners
 			targets, errors := targetsForLoadBalancerV1(lb)
-			if len(errors) > 0 {
-				errorMessages = append(errorMessages, errors...)
+			for _, err := range errors {
+				errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s in region %s: %s", identification.Arn, region, err))
 			}
 
 			listeners, errors := listenersForLoadBalancerV1(lb)
-			if len(errors) > 0 {
-				errorMessages = append(errorMessages, errors...)
+			for _, err := range errors {
+				errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s in region %s: %s", identification.Arn, region, err))
 			}
 
 			// Create resource info
@@ -99,11 +103,17 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 			}
 
 			// Add resource references with deduplication
-			if lb.VPCId != nil {
+			if aws.ToString(lb.VPCId) != "" {
+				var subnetIDs []string
+				for _, subnetID := range lb.Subnets {
+					if subnetID != "" {
+						subnetIDs = append(subnetIDs, subnetID)
+					}
+				}
 				resources.Vpc = &common.VpcReference{
 					Id:        aws.ToString(lb.VPCId),
 					Region:    region,
-					SubnetIds: lb.Subnets,
+					SubnetIds: subnetIDs,
 				}
 			}
 			resources.SecurityGroups = createSecurityGroupReferences(lb.SecurityGroups, region)
@@ -127,12 +137,12 @@ func classicLoadBalancerIdentification(
 	region string,
 	accountID string,
 ) (*loadbalancerfern.LoadBalancerIdentificationInfo, error) {
+	if aws.ToString(loadBalancer.LoadBalancerName) == "" || region == "" || accountID == "" {
+		return nil, fmt.Errorf("Classic load balancer missing required name, region, or account ID")
+	}
 	identification := &loadbalancerfern.LoadBalancerIdentificationInfo{
 		Name:   loadBalancer.LoadBalancerName,
 		Region: region,
-	}
-	if loadBalancer.LoadBalancerName == nil {
-		return identification, fmt.Errorf("Classic load balancer name is nil")
 	}
 
 	loadBalancerARN, err := methodawsutils.BuildRegionalARN(
@@ -142,9 +152,9 @@ func classicLoadBalancerIdentification(
 		"loadbalancer/"+*loadBalancer.LoadBalancerName,
 	)
 	if err != nil {
-		return identification, fmt.Errorf("build Classic load balancer ARN for %s: %w", *loadBalancer.LoadBalancerName, err)
+		return nil, fmt.Errorf("build Classic load balancer ARN for %s: %w", *loadBalancer.LoadBalancerName, err)
 	}
-	identification.Arn = &loadBalancerARN
+	identification.Arn = loadBalancerARN
 	return identification, nil
 }
 
@@ -166,15 +176,15 @@ func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*lo
 	}
 
 	for _, instance := range loadBalancer.Instances {
-		if instance.InstanceId == nil {
-			errorMessages = append(errorMessages, "Classic load balancer instance ID is nil")
+		if aws.ToString(instance.InstanceId) == "" {
+			errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s has a target with no instance ID", aws.ToString(loadBalancer.LoadBalancerName)))
 			continue
 		}
 		targetType := loadbalancerfern.TargetTypeInstance
 		target := &loadbalancerfern.Target{
 			Id:   *instance.InstanceId,
 			Port: instancePort,
-			Type: &targetType,
+			Type: targetType,
 		}
 		targets = append(targets, target)
 	}
@@ -192,7 +202,11 @@ func listenersForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*
 			continue
 		}
 		port := int(listener.Listener.LoadBalancerPort)
-		fernListener := &loadbalancerfern.Listener{Port: &port}
+		if port < 1 || port > 65535 {
+			errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s has a listener without a valid frontend port", aws.ToString(loadBalancer.LoadBalancerName)))
+			continue
+		}
+		fernListener := &loadbalancerfern.Listener{Id: strconv.Itoa(port), Port: &port}
 
 		// Convert protocol
 		if listener.Listener.Protocol != nil {
