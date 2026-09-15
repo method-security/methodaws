@@ -78,7 +78,7 @@ types:
       sourceDestCheck: optional<boolean>
   InstanceNetworkInterfaceResourceInfo:
     properties:
-      vpc: optional<common.VpcReference>
+      vpc: common.VpcReference
 # Main Network Interface Structs
   InstanceNetworkInterface:
     properties:

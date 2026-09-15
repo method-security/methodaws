@@ -241,9 +241,9 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 				PrivateIpAddresses: privateIPAddresses,
 				SourceDestCheck:    ni.SourceDestCheck,
 			},
-			Resources: &ec2.InstanceNetworkInterfaceResourceInfo{
-				Vpc: vpcReference,
-			},
+		}
+		if vpcReference != nil {
+			fernNI.Resources = &ec2.InstanceNetworkInterfaceResourceInfo{Vpc: vpcReference}
 		}
 
 		fernInterfaces = append(fernInterfaces, fernNI)
