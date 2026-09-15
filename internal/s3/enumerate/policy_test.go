@@ -265,6 +265,20 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: boolPointer(false),
 		},
 		{
+			name: "anonymous principal account condition permits anonymous access",
+			policy: `{
+				"Statement": [{
+					"Effect": "Allow",
+					"Principal": "*",
+					"Action": "s3:GetObject",
+					"Resource": "arn:aws:s3:::example-bucket/*",
+					"Condition": {"StringEquals": {"aws:PrincipalAccount": "anonymous"}}
+				}]
+			}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
 			name: "unknown condition is not guessed",
 			policy: `{
 				"Statement": [{

@@ -228,6 +228,37 @@ func TestEvaluateS3AccessAppliesCompletePolicyDenyToACLRead(t *testing.T) {
 	assert.Equal(t, boolPointer(false), accessControl.AllowPublicRead)
 }
 
+func TestEvaluateS3AccessEvaluatesDeniesForEachACLPrincipalType(t *testing.T) {
+	t.Parallel()
+
+	denyMissingPrincipalARN := `{
+		"Statement": [{
+			"Effect": "Deny",
+			"Principal": "*",
+			"Action": ["s3:ListBucket", "s3:ListBucketVersions", "s3:ListBucketMultipartUploads"],
+			"Resource": "arn:aws:s3:::example-bucket",
+			"Condition": {"Null": {"aws:PrincipalArn": "true"}}
+		}]
+	}`
+	accessControl, err := evaluateS3Access(accessEvaluationInput{
+		bucketARN: testBucketARN,
+		grants: []types.Grant{
+			aclGrant(allUsersGroup, types.PermissionRead),
+			aclGrant(authenticatedUsersGroup, types.PermissionRead),
+		},
+		aclKnown:                 true,
+		policyDocument:           &denyMissingPrincipalARN,
+		policyKnown:              true,
+		bucketPublicAccessBlock:  knownPublicAccessBlock(false, false, false, false),
+		accountPublicAccessBlock: knownPublicAccessBlock(false, false, false, false),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, accessControl)
+	assert.Equal(t, boolPointer(false), accessControl.AllowPublicRead)
+	assert.Equal(t, boolPointer(true), accessControl.AllowAuthenticatedUsersRead)
+}
+
 func TestEvaluateS3AccessRequiresEveryACLWriteOperationToBeDenied(t *testing.T) {
 	t.Parallel()
 

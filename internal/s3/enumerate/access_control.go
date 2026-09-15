@@ -59,24 +59,32 @@ func evaluateS3Access(input accessEvaluationInput) (*s3fern.S3BucketAccessContro
 	policy, policyErr := evaluatePolicyPermissions(input.policyDocument, input.policyKnown, input.bucketARN)
 	publicAccessBlock := mergePublicAccessBlocks(input.bucketPublicAccessBlock, input.accountPublicAccessBlock)
 
-	readACLBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.denyACLRead)
-	writeACLBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.denyACLWrite)
-	readACPBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.denyACLReadACP)
-	writeACPBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.denyACLWriteACP)
-	fullControlBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.denyACLFullControl)
+	readACLBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.anonymousACLDenies.read)
+	writeACLBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.anonymousACLDenies.write)
+	readACPBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.anonymousACLDenies.readACP)
+	writeACPBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.anonymousACLDenies.writeACP)
+	fullControlBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.anonymousACLDenies.fullControl)
+	authenticatedReadBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.authenticatedACLDenies.read)
+	authenticatedWriteBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.authenticatedACLDenies.write)
+	authenticatedReadACPBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.authenticatedACLDenies.readACP)
+	authenticatedWriteACPBlocked := orDecisions(publicAccessBlock.ignorePublicACLs, policy.authenticatedACLDenies.writeACP)
+	authenticatedFullControlBlocked := orDecisions(
+		publicAccessBlock.ignorePublicACLs,
+		policy.authenticatedACLDenies.fullControl,
+	)
 
 	acl.publicRead = blockedDecision(acl.publicRead, readACLBlocked)
 	acl.publicWrite = blockedDecision(acl.publicWrite, writeACLBlocked)
 	acl.publicReadACP = blockedDecision(acl.publicReadACP, readACPBlocked)
 	acl.publicWriteACP = blockedDecision(acl.publicWriteACP, writeACPBlocked)
 	acl.publicFullControl = blockedDecision(acl.publicFullControl, fullControlBlocked)
-	acl.authenticatedUsersRead = blockedDecision(acl.authenticatedUsersRead, readACLBlocked)
-	acl.authenticatedUsersWrite = blockedDecision(acl.authenticatedUsersWrite, writeACLBlocked)
-	acl.authenticatedUsersReadACP = blockedDecision(acl.authenticatedUsersReadACP, readACPBlocked)
-	acl.authenticatedUsersWriteACP = blockedDecision(acl.authenticatedUsersWriteACP, writeACPBlocked)
-	acl.authenticatedUsersFullControl = blockedDecision(acl.authenticatedUsersFullControl, fullControlBlocked)
-	acl.logDeliveryWrite = blockedDecision(acl.logDeliveryWrite, policy.denyACLWrite)
-	acl.logDeliveryReadACP = blockedDecision(acl.logDeliveryReadACP, policy.denyACLReadACP)
+	acl.authenticatedUsersRead = blockedDecision(acl.authenticatedUsersRead, authenticatedReadBlocked)
+	acl.authenticatedUsersWrite = blockedDecision(acl.authenticatedUsersWrite, authenticatedWriteBlocked)
+	acl.authenticatedUsersReadACP = blockedDecision(acl.authenticatedUsersReadACP, authenticatedReadACPBlocked)
+	acl.authenticatedUsersWriteACP = blockedDecision(acl.authenticatedUsersWriteACP, authenticatedWriteACPBlocked)
+	acl.authenticatedUsersFullControl = blockedDecision(acl.authenticatedUsersFullControl, authenticatedFullControlBlocked)
+	acl.logDeliveryWrite = blockedDecision(acl.logDeliveryWrite, policy.authenticatedACLDenies.write)
+	acl.logDeliveryReadACP = blockedDecision(acl.logDeliveryReadACP, policy.authenticatedACLDenies.readACP)
 
 	policy.publicRead = blockedDecision(policy.publicRead, publicAccessBlock.restrictPublicBuckets)
 	policy.publicWrite = blockedDecision(policy.publicWrite, publicAccessBlock.restrictPublicBuckets)
@@ -184,13 +192,20 @@ func evaluatePolicyPermissions(policyDocument *string, known bool, bucketARN str
 
 func knownEmptyPolicyPermissions() policyPermissions {
 	return policyPermissions{
-		publicRead:         boolPointer(false),
-		publicWrite:        boolPointer(false),
-		denyACLRead:        boolPointer(false),
-		denyACLWrite:       boolPointer(false),
-		denyACLReadACP:     boolPointer(false),
-		denyACLWriteACP:    boolPointer(false),
-		denyACLFullControl: boolPointer(false),
+		publicRead:             boolPointer(false),
+		publicWrite:            boolPointer(false),
+		anonymousACLDenies:     knownEmptyACLPolicyDenies(),
+		authenticatedACLDenies: knownEmptyACLPolicyDenies(),
+	}
+}
+
+func knownEmptyACLPolicyDenies() aclPolicyDenies {
+	return aclPolicyDenies{
+		read:        boolPointer(false),
+		write:       boolPointer(false),
+		readACP:     boolPointer(false),
+		writeACP:    boolPointer(false),
+		fullControl: boolPointer(false),
 	}
 }
 

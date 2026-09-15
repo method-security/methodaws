@@ -2,6 +2,7 @@ package enumerate
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,6 +14,7 @@ import (
 
 type stubListBucketsClient struct {
 	outputs []*s3.ListBucketsOutput
+	errors  []error
 	inputs  []*s3.ListBucketsInput
 }
 
@@ -23,9 +25,56 @@ func (s *stubListBucketsClient) ListBuckets(
 ) (*s3.ListBucketsOutput, error) {
 	inputCopy := *input
 	s.inputs = append(s.inputs, &inputCopy)
+	if len(s.errors) > 0 {
+		err := s.errors[0]
+		s.errors = s.errors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	output := s.outputs[0]
 	s.outputs = s.outputs[1:]
 	return output, nil
+}
+
+func TestListBucketsPreservesCompletedPagesWhenPaginationFails(t *testing.T) {
+	t.Parallel()
+
+	client := &stubListBucketsClient{
+		outputs: []*s3.ListBucketsOutput{{
+			Buckets:           []types.Bucket{{Name: aws.String("preserved")}},
+			ContinuationToken: aws.String("next-page"),
+		}},
+		errors: []error{nil, errors.New("page two denied")},
+	}
+
+	output, err := listBuckets(context.Background(), client)
+
+	require.EqualError(t, err, "page two denied")
+	require.NotNil(t, output)
+	require.Len(t, output.Buckets, 1)
+	assert.Equal(t, "preserved", aws.ToString(output.Buckets[0].Name))
+}
+
+func TestDiscoverPolicyReferencesPreservesCompleteARNs(t *testing.T) {
+	t.Parallel()
+
+	policy := `{
+		"Statement": [{
+			"Principal": {"AWS": "arn:aws:iam::123456789012:role/test-role"},
+			"Resource": "arn:aws:lambda:us-east-1:123456789012:function:test-function"
+		}]
+	}`
+
+	roles := discoverIamRolesFromPolicy(policy, "us-east-1")
+	require.Len(t, roles, 1)
+	assert.Equal(t, "arn:aws:iam::123456789012:role/test-role", roles[0].Arn)
+	assert.Equal(t, "test-role", aws.ToString(roles[0].RoleName))
+
+	functions := discoverLambdaFromPolicy(policy, "us-east-1")
+	require.Len(t, functions, 1)
+	assert.Equal(t, "arn:aws:lambda:us-east-1:123456789012:function:test-function", functions[0].Arn)
+	assert.Equal(t, "test-function", aws.ToString(functions[0].FunctionName))
 }
 
 func TestKmsKeyReferenceRequiresKeyARN(t *testing.T) {

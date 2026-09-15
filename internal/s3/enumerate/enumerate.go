@@ -4,9 +4,10 @@ package enumerate
 import (
 	// Standard
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
+	"sort"
 	"strings"
 
 	// Generated
@@ -297,11 +298,9 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	if err != nil {
 		log.Error("Failed to list S3 buckets", svc1log.Stacktrace(err))
 		errors = append(errors, err.Error())
-		report.Errors = errors
-		return report
 	}
 	if listBucketsOutput == nil {
-		report.Errors = []string{"ListBuckets returned no response"}
+		report.Errors = append(errors, "ListBuckets returned no response")
 		return report
 	}
 
@@ -459,10 +458,10 @@ func listBuckets(ctx context.Context, client listBucketsAPI) (*s3.ListBucketsOut
 	for {
 		page, err := client.ListBuckets(ctx, input)
 		if err != nil {
-			return nil, err
+			return result, err
 		}
 		if page == nil {
-			return nil, fmt.Errorf("ListBuckets returned no response")
+			return result, fmt.Errorf("ListBuckets returned no response")
 		}
 		result.Buckets = append(result.Buckets, page.Buckets...)
 		if result.Owner == nil {
@@ -472,7 +471,7 @@ func listBuckets(ctx context.Context, client listBucketsAPI) (*s3.ListBucketsOut
 			return result, nil
 		}
 		if _, exists := seenTokens[*page.ContinuationToken]; exists {
-			return nil, fmt.Errorf("ListBuckets returned duplicate continuation token")
+			return result, fmt.Errorf("ListBuckets returned duplicate continuation token")
 		}
 		seenTokens[*page.ContinuationToken] = struct{}{}
 		input.ContinuationToken = page.ContinuationToken
@@ -523,61 +522,96 @@ func discoverS3Resources(bucket *s3fern.S3Bucket) *s3fern.S3BucketResourceInfo {
 
 func discoverIamRolesFromPolicy(policyDocument, region string) []*common.IamRoleReference {
 	iamMap := make(map[string]*common.IamRoleReference)
-
-	// Regex to match IAM role ARNs in policy documents
-	iamRoleArnRegex := regexp.MustCompile(`arn:aws[a-z-]*:iam::([^:]+):role/([^\"'\\s]+)`)
-
-	matches := iamRoleArnRegex.FindAllStringSubmatch(policyDocument, -1)
-	for _, match := range matches {
-		if len(match) > 2 {
-			arn := match[0]
-			roleName := match[2]
-
-			key := arn
-			if _, exists := iamMap[key]; !exists {
-				iamMap[key] = &common.IamRoleReference{
-					Arn:      arn,
-					RoleName: &roleName,
-					Region:   region, // IAM is global but we store the bucket's region for context
-				}
+	for _, parsedARN := range concretePolicyARNs(policyDocument) {
+		if parsedARN.Service != "iam" || !strings.HasPrefix(parsedARN.Resource, "role/") {
+			continue
+		}
+		rolePath := strings.TrimPrefix(parsedARN.Resource, "role/")
+		roleName := rolePath[strings.LastIndex(rolePath, "/")+1:]
+		if roleName == "" {
+			continue
+		}
+		arnValue := parsedARN.String()
+		if _, exists := iamMap[arnValue]; !exists {
+			iamMap[arnValue] = &common.IamRoleReference{
+				Arn:      arnValue,
+				RoleName: &roleName,
+				Region:   region, // IAM is global but we store the bucket's region for context
 			}
 		}
 	}
 
-	var iamRoles []*common.IamRoleReference
-	for _, role := range iamMap {
-		iamRoles = append(iamRoles, role)
+	arns := sortedMapKeys(iamMap)
+	iamRoles := make([]*common.IamRoleReference, 0, len(arns))
+	for _, arnValue := range arns {
+		iamRoles = append(iamRoles, iamMap[arnValue])
 	}
 	return iamRoles
 }
 
-func discoverLambdaFromPolicy(policyDocument, region string) []*common.LambdaReference {
+func discoverLambdaFromPolicy(policyDocument, _ string) []*common.LambdaReference {
 	lambdaMap := make(map[string]*common.LambdaReference)
-
-	// Regex to match Lambda function ARNs in policy documents
-	lambdaArnRegex := regexp.MustCompile(`arn:aws[a-z-]*:lambda:([^:]+):([^:]+):function:([^\"'\\s]+)`)
-
-	matches := lambdaArnRegex.FindAllStringSubmatch(policyDocument, -1)
-	for _, match := range matches {
-		if len(match) > 3 {
-			arn := match[0]
-			functionRegion := match[1]
-			functionName := match[3]
-
-			key := arn
-			if _, exists := lambdaMap[key]; !exists {
-				lambdaMap[key] = &common.LambdaReference{
-					Arn:          arn,
-					FunctionName: &functionName,
-					Region:       functionRegion,
-				}
+	for _, parsedARN := range concretePolicyARNs(policyDocument) {
+		resourceParts := strings.Split(parsedARN.Resource, ":")
+		if parsedARN.Service != "lambda" || len(resourceParts) < 2 || resourceParts[0] != "function" || resourceParts[1] == "" {
+			continue
+		}
+		functionName := resourceParts[1]
+		arnValue := parsedARN.String()
+		if _, exists := lambdaMap[arnValue]; !exists {
+			lambdaMap[arnValue] = &common.LambdaReference{
+				Arn:          arnValue,
+				FunctionName: &functionName,
+				Region:       parsedARN.Region,
 			}
 		}
 	}
 
-	var lambdaFunctions []*common.LambdaReference
-	for _, lambda := range lambdaMap {
-		lambdaFunctions = append(lambdaFunctions, lambda)
+	arns := sortedMapKeys(lambdaMap)
+	lambdaFunctions := make([]*common.LambdaReference, 0, len(arns))
+	for _, arnValue := range arns {
+		lambdaFunctions = append(lambdaFunctions, lambdaMap[arnValue])
 	}
 	return lambdaFunctions
+}
+
+func concretePolicyARNs(policyDocument string) []arn.ARN {
+	var document any
+	if err := json.Unmarshal([]byte(policyDocument), &document); err != nil {
+		return nil
+	}
+
+	var parsedARNs []arn.ARN
+	var visit func(any)
+	visit = func(value any) {
+		switch typedValue := value.(type) {
+		case map[string]any:
+			for _, child := range typedValue {
+				visit(child)
+			}
+		case []any:
+			for _, child := range typedValue {
+				visit(child)
+			}
+		case string:
+			if strings.ContainsAny(typedValue, "*?$") {
+				return
+			}
+			parsedARN, err := arn.Parse(typedValue)
+			if err == nil {
+				parsedARNs = append(parsedARNs, parsedARN)
+			}
+		}
+	}
+	visit(document)
+	return parsedARNs
+}
+
+func sortedMapKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

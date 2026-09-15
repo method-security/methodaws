@@ -10,14 +10,26 @@ import (
 )
 
 type policyPermissions struct {
-	publicRead         *bool
-	publicWrite        *bool
-	denyACLRead        *bool
-	denyACLWrite       *bool
-	denyACLReadACP     *bool
-	denyACLWriteACP    *bool
-	denyACLFullControl *bool
+	publicRead             *bool
+	publicWrite            *bool
+	anonymousACLDenies     aclPolicyDenies
+	authenticatedACLDenies aclPolicyDenies
 }
+
+type aclPolicyDenies struct {
+	read        *bool
+	write       *bool
+	readACP     *bool
+	writeACP    *bool
+	fullControl *bool
+}
+
+type policyPrincipalKind uint8
+
+const (
+	policyPrincipalAnonymous policyPrincipalKind = iota
+	policyPrincipalAuthenticated
+)
 
 type policyDocument struct {
 	Version    string           `json:"Version"`
@@ -141,24 +153,36 @@ func analyzeBucketPolicy(policyJSON, bucketARN string) (policyPermissions, error
 	resolveAnonymousPolicyVariables(document.Statements, document.Version)
 
 	return policyPermissions{
-		publicRead:         evaluatePolicyCapability(document.Statements, bucketARN, publicReadOperations),
-		publicWrite:        evaluatePolicyCapability(document.Statements, bucketARN, publicWriteOperations),
-		denyACLRead:        evaluatePolicyDenyCapability(document.Statements, bucketARN, aclReadOperations),
-		denyACLWrite:       evaluatePolicyDenyCapability(document.Statements, bucketARN, aclWriteOperations),
-		denyACLReadACP:     evaluatePolicyDenyCapability(document.Statements, bucketARN, aclReadACPOperations),
-		denyACLWriteACP:    evaluatePolicyDenyCapability(document.Statements, bucketARN, aclWriteACPOperations),
-		denyACLFullControl: evaluateAnyPolicyDeny(document.Statements, bucketARN),
+		publicRead:             evaluatePolicyCapability(document.Statements, bucketARN, publicReadOperations),
+		publicWrite:            evaluatePolicyCapability(document.Statements, bucketARN, publicWriteOperations),
+		anonymousACLDenies:     evaluateACLPolicyDenies(document.Statements, bucketARN, policyPrincipalAnonymous),
+		authenticatedACLDenies: evaluateACLPolicyDenies(document.Statements, bucketARN, policyPrincipalAuthenticated),
 	}, nil
+}
+
+func evaluateACLPolicyDenies(
+	statements []policyStatement,
+	bucketARN string,
+	principalKind policyPrincipalKind,
+) aclPolicyDenies {
+	return aclPolicyDenies{
+		read:        evaluatePolicyDenyCapability(statements, bucketARN, aclReadOperations, principalKind),
+		write:       evaluatePolicyDenyCapability(statements, bucketARN, aclWriteOperations, principalKind),
+		readACP:     evaluatePolicyDenyCapability(statements, bucketARN, aclReadACPOperations, principalKind),
+		writeACP:    evaluatePolicyDenyCapability(statements, bucketARN, aclWriteACPOperations, principalKind),
+		fullControl: evaluateAnyPolicyDeny(statements, bucketARN, principalKind),
+	}
 }
 
 func evaluatePolicyDenyCapability(
 	statements []policyStatement,
 	bucketARN string,
 	operations []func(string) policyOperation,
+	principalKind policyPrincipalKind,
 ) *bool {
 	unknown := false
 	for _, operationForBucket := range operations {
-		denied := evaluatePolicyOperationDeny(statements, operationForBucket(bucketARN))
+		denied := evaluatePolicyOperationDeny(statements, operationForBucket(bucketARN), principalKind)
 		if denied != nil && !*denied {
 			return boolPointer(false)
 		}
@@ -172,7 +196,7 @@ func evaluatePolicyDenyCapability(
 	return boolPointer(true)
 }
 
-func evaluateAnyPolicyDeny(statements []policyStatement, bucketARN string) *bool {
+func evaluateAnyPolicyDeny(statements []policyStatement, bucketARN string, principalKind policyPrincipalKind) *bool {
 	unknown := false
 	operationGroups := [][]func(string) policyOperation{
 		aclReadOperations,
@@ -182,7 +206,7 @@ func evaluateAnyPolicyDeny(statements []policyStatement, bucketARN string) *bool
 	}
 	for _, operations := range operationGroups {
 		for _, operationForBucket := range operations {
-			denied := evaluatePolicyOperationDeny(statements, operationForBucket(bucketARN))
+			denied := evaluatePolicyOperationDeny(statements, operationForBucket(bucketARN), principalKind)
 			if denied != nil && *denied {
 				return boolPointer(true)
 			}
@@ -197,7 +221,11 @@ func evaluateAnyPolicyDeny(statements []policyStatement, bucketARN string) *bool
 	return boolPointer(false)
 }
 
-func evaluatePolicyOperationDeny(statements []policyStatement, operation policyOperation) *bool {
+func evaluatePolicyOperationDeny(
+	statements []policyStatement,
+	operation policyOperation,
+	principalKind policyPrincipalKind,
+) *bool {
 	unknown := false
 	for _, statement := range statements {
 		if !strings.EqualFold(statement.Effect, "Deny") {
@@ -219,7 +247,7 @@ func evaluatePolicyOperationDeny(statements []policyStatement, operation policyO
 		if len(statement.Condition) == 0 {
 			return boolPointer(true)
 		}
-		switch classifyDenyCondition(statement.Condition) {
+		switch classifyDenyCondition(statement.Condition, principalKind) {
 		case denyBlocksPublic:
 			return boolPointer(true)
 		case denyUnknown:
@@ -371,7 +399,7 @@ func evaluatePolicyOperation(statements []policyStatement, operation policyOpera
 				unknownDeny = true
 				continue
 			}
-			switch classifyDenyCondition(statement.Condition) {
+			switch classifyDenyCondition(statement.Condition, policyPrincipalAnonymous) {
 			case denyBlocksPublic:
 				return boolPointer(false)
 			case denyUnknown:
@@ -570,6 +598,9 @@ func classifyAllowConditionEntry(operator, key string, rawValues json.RawMessage
 	if normalizedKey == "aws:sourceip" {
 		return classifySourceIPCondition(operator, rawValues)
 	}
+	if normalizedKey == "aws:principalaccount" {
+		return classifyKnownConditionValue(operator, rawValues, "anonymous")
+	}
 	if _, ok := trustedConditionKeys[normalizedKey]; ok {
 		if isPositiveIfExistsOperator(operator) {
 			// IfExists makes the condition true when an anonymous request omits the key.
@@ -612,6 +643,57 @@ func classifyAllowConditionEntry(operator, key string, rawValues json.RawMessage
 		return conditionPublic
 	}
 	return conditionUnknown
+}
+
+func classifyKnownConditionValue(operator string, rawValues json.RawMessage, value string) conditionResult {
+	values, err := decodeStringList(rawValues)
+	if err != nil || len(values) == 0 {
+		return conditionUnknown
+	}
+	if strings.EqualFold(operator, "Null") {
+		if len(values) != 1 {
+			return conditionUnknown
+		}
+		switch {
+		case strings.EqualFold(values[0], "false"):
+			return conditionPublic
+		case strings.EqualFold(values[0], "true"):
+			return conditionRestricted
+		default:
+			return conditionUnknown
+		}
+	}
+	normalizedOperator := strings.ToLower(operator)
+	normalizedOperator = strings.TrimPrefix(normalizedOperator, "foranyvalue:")
+	normalizedOperator = strings.TrimPrefix(normalizedOperator, "forallvalues:")
+	normalizedOperator = strings.TrimSuffix(normalizedOperator, "ifexists")
+
+	matches := false
+	for _, candidate := range values {
+		switch normalizedOperator {
+		case "stringequals", "arnequals", "stringnotequals", "arnnotequals":
+			matches = candidate == value
+		case "stringlike", "arnlike", "stringnotlike", "arnnotlike":
+			matches = wildcardMatch(candidate, value, false)
+		}
+		if matches {
+			break
+		}
+	}
+	switch normalizedOperator {
+	case "stringequals", "arnequals", "stringlike", "arnlike":
+		if matches {
+			return conditionPublic
+		}
+		return conditionRestricted
+	case "stringnotequals", "arnnotequals", "stringnotlike", "arnnotlike":
+		if matches {
+			return conditionRestricted
+		}
+		return conditionPublic
+	default:
+		return conditionUnknown
+	}
 }
 
 func classifySourceIPCondition(operator string, rawValues json.RawMessage) conditionResult {
@@ -815,7 +897,10 @@ const (
 	denyUnknown
 )
 
-func classifyDenyCondition(condition map[string]map[string]json.RawMessage) denyConditionResult {
+func classifyDenyCondition(
+	condition map[string]map[string]json.RawMessage,
+	principalKind policyPrincipalKind,
+) denyConditionResult {
 	if len(condition) == 0 {
 		return denyBlocksPublic
 	}
@@ -830,12 +915,43 @@ func classifyDenyCondition(condition map[string]map[string]json.RawMessage) deny
 			return denyUnknown
 		}
 		for key, rawValues := range entries {
-			if _, ok := trustedConditionKeys[strings.ToLower(key)]; !ok {
+			normalizedKey := strings.ToLower(key)
+			if _, ok := trustedConditionKeys[normalizedKey]; !ok {
 				return denyUnknown
+			}
+			if principalKind == policyPrincipalAnonymous && normalizedKey == "aws:principalaccount" {
+				switch classifyKnownConditionValue(operator, rawValues, "anonymous") {
+				case conditionPublic:
+					return denyBlocksPublic
+				case conditionRestricted:
+					return denyDoesNotBlockPublic
+				default:
+					return denyUnknown
+				}
 			}
 			if strings.EqualFold(operator, "Null") {
 				values, err := decodeStringList(rawValues)
 				if err != nil || len(values) != 1 {
+					return denyUnknown
+				}
+				keyPresent, presenceKnown := policyConditionKeyPresence(principalKind, normalizedKey)
+				if presenceKnown {
+					switch {
+					case strings.EqualFold(values[0], "true"):
+						if keyPresent {
+							return denyDoesNotBlockPublic
+						}
+						return denyBlocksPublic
+					case strings.EqualFold(values[0], "false"):
+						if keyPresent {
+							return denyBlocksPublic
+						}
+						return denyDoesNotBlockPublic
+					default:
+						return denyUnknown
+					}
+				}
+				if principalKind == policyPrincipalAuthenticated {
 					return denyUnknown
 				}
 				switch {
@@ -846,6 +962,9 @@ func classifyDenyCondition(condition map[string]map[string]json.RawMessage) deny
 				default:
 					return denyUnknown
 				}
+			}
+			if principalKind == policyPrincipalAuthenticated {
+				return denyUnknown
 			}
 			fixed, err := conditionValuesAreFixed(rawValues)
 			if err != nil || !fixed {
@@ -869,6 +988,17 @@ func classifyDenyCondition(condition map[string]map[string]json.RawMessage) deny
 		}
 	}
 	return denyUnknown
+}
+
+func policyConditionKeyPresence(principalKind policyPrincipalKind, key string) (bool, bool) {
+	switch key {
+	case "aws:principalaccount":
+		return true, true
+	case "aws:principalarn":
+		return principalKind == policyPrincipalAuthenticated, true
+	default:
+		return false, false
+	}
 }
 
 func decodeStringList(data []byte) ([]string, error) {
