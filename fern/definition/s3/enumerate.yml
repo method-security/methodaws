@@ -80,6 +80,7 @@ types:
       value: string
   S3LambdaNotification:
     properties:
+      # Identifies the notification configuration within this bucket; function.arn identifies the Lambda function.
       id: optional<string>
       function: common.LambdaReference
       events: list<string>
