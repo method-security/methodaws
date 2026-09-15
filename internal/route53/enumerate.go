@@ -16,8 +16,7 @@ import (
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
-// REGION is the region to use for Route53 enumeration.
-// Route53 is a global service, so we only need to query once.
+// REGION is the fallback when no region is configured for the global service.
 const (
 	REGION = "us-east-1"
 )
@@ -41,19 +40,22 @@ func listHostedZones(ctx context.Context, route53Client *route53.Client) ([]rout
 		log.Info("Retrieved hosted zones page", svc1log.SafeParam("zoneCount", len(page.HostedZones)))
 
 		for _, hostedZone := range page.HostedZones {
-			if hostedZone.CallerReference == nil || hostedZone.Id == nil || hostedZone.Name == nil {
-				errors = append(errors, "Route53 hosted zone identity is incomplete")
+			zoneID := canonicalHostedZoneID(aws.ToString(hostedZone.Id))
+			if zoneID == "" || aws.ToString(hostedZone.Name) == "" {
+				errors = append(errors, fmt.Sprintf("Route53 hosted zone %q (%q) has an incomplete identity", aws.ToString(hostedZone.Name), aws.ToString(hostedZone.Id)))
 				continue
 			}
 			// Prepare identification info
 			identification := &route53fern.HostedZoneIdentificationInfo{
-				CallerReference: *hostedZone.CallerReference,
-				Id:              *hostedZone.Id,
-				Name:            *hostedZone.Name,
+				Id:   zoneID,
+				Name: *hostedZone.Name,
 			}
 
 			// Prepare configuration info
 			configuration := &route53fern.HostedZoneConfigurationInfo{}
+			if aws.ToString(hostedZone.CallerReference) != "" {
+				configuration.CallerReference = hostedZone.CallerReference
+			}
 
 			// Add optional hosted zone config if it exists
 			if hostedZone.Config != nil {
@@ -147,33 +149,50 @@ func listDNSRecords(ctx context.Context, route53Client *route53.Client, zoneID s
 			svc1log.SafeParam("recordCount", len(page.ResourceRecordSets)))
 
 		for _, recordSet := range page.ResourceRecordSets {
-			if recordSet.Name == nil {
+			if aws.ToString(recordSet.Name) == "" {
 				errors = append(errors, fmt.Sprintf("DNS record name is missing in zone %s", zoneID))
+				continue
+			}
+			recordType, err := route53fern.NewRecordTypeFromString(string(recordSet.Type))
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("DNS record %q in zone %s has an invalid type %q: %s", *recordSet.Name, zoneID, recordSet.Type, err))
+				continue
+			}
+			nonSimpleRouting := recordSet.Weight != nil || recordSet.Region != "" || recordSet.Failover != "" ||
+				recordSet.GeoLocation != nil || recordSet.GeoProximityLocation != nil || recordSet.CidrRoutingConfig != nil || aws.ToBool(recordSet.MultiValueAnswer)
+			if (nonSimpleRouting || recordSet.SetIdentifier != nil) && aws.ToString(recordSet.SetIdentifier) == "" {
+				errors = append(errors, fmt.Sprintf("DNS record %q (%s) in zone %s is missing its routing set identifier", *recordSet.Name, recordType, zoneID))
 				continue
 			}
 			// Convert AWS SDK ResourceRecordSet to fern ResourceRecordSet
 			fernRecord := &route53fern.ResourceRecordSet{
 				Name: *recordSet.Name,
-				Type: route53fern.RecordType(strings.ToUpper(string(recordSet.Type))),
+				Type: recordType,
 			}
 
 			// Handle optional fields
-			if recordSet.AliasTarget != nil && recordSet.AliasTarget.DNSName != nil && recordSet.AliasTarget.HostedZoneId != nil {
-				aliasTarget := &route53fern.AliasTarget{
-					DnsName:              *recordSet.AliasTarget.DNSName,
-					HostedZoneId:         *recordSet.AliasTarget.HostedZoneId,
-					EvaluateTargetHealth: recordSet.AliasTarget.EvaluateTargetHealth,
+			if recordSet.AliasTarget != nil {
+				targetZoneID := canonicalHostedZoneID(aws.ToString(recordSet.AliasTarget.HostedZoneId))
+				if aws.ToString(recordSet.AliasTarget.DNSName) == "" || targetZoneID == "" {
+					errors = append(errors, fmt.Sprintf("DNS record %q (%s) in zone %s has an alias target without a DNS name or hosted-zone ID", *recordSet.Name, recordType, zoneID))
+				} else {
+					fernRecord.AliasTarget = &route53fern.AliasTarget{
+						DnsName:              *recordSet.AliasTarget.DNSName,
+						HostedZoneId:         targetZoneID,
+						EvaluateTargetHealth: recordSet.AliasTarget.EvaluateTargetHealth,
+					}
 				}
-				fernRecord.AliasTarget = aliasTarget
 			}
 
-			if recordSet.CidrRoutingConfig != nil && recordSet.CidrRoutingConfig.CollectionId != nil &&
-				recordSet.CidrRoutingConfig.LocationName != nil {
-				cidrRouting := &route53fern.CidrRouting{
-					CollectionId: *recordSet.CidrRoutingConfig.CollectionId,
-					LocationName: *recordSet.CidrRoutingConfig.LocationName,
+			if recordSet.CidrRoutingConfig != nil {
+				if aws.ToString(recordSet.CidrRoutingConfig.CollectionId) == "" || aws.ToString(recordSet.CidrRoutingConfig.LocationName) == "" {
+					errors = append(errors, fmt.Sprintf("DNS record %q (%s) in zone %s has incomplete CIDR routing identity", *recordSet.Name, recordType, zoneID))
+				} else {
+					fernRecord.CidrRouting = &route53fern.CidrRouting{
+						CollectionId: *recordSet.CidrRoutingConfig.CollectionId,
+						LocationName: *recordSet.CidrRoutingConfig.LocationName,
+					}
 				}
-				fernRecord.CidrRouting = cidrRouting
 			}
 
 			if recordSet.Failover != "" {
@@ -191,7 +210,11 @@ func listDNSRecords(ctx context.Context, route53Client *route53.Client, zoneID s
 			}
 
 			if recordSet.HealthCheckId != nil {
-				fernRecord.HealthCheckId = recordSet.HealthCheckId
+				if *recordSet.HealthCheckId != "" {
+					fernRecord.HealthCheckId = recordSet.HealthCheckId
+				} else {
+					errors = append(errors, fmt.Sprintf("DNS record %q (%s) in zone %s has an empty health-check ID", *recordSet.Name, recordType, zoneID))
+				}
 			}
 
 			if recordSet.MultiValueAnswer != nil {
@@ -206,7 +229,8 @@ func listDNSRecords(ctx context.Context, route53Client *route53.Client, zoneID s
 			if recordSet.ResourceRecords != nil {
 				var resourceRecords []*route53fern.ResourceRecord
 				for _, rr := range recordSet.ResourceRecords {
-					if rr.Value == nil {
+					if aws.ToString(rr.Value) == "" {
+						errors = append(errors, fmt.Sprintf("DNS record %q (%s) in zone %s has a resource record without a value", *recordSet.Name, recordType, zoneID))
 						continue
 					}
 					resourceRecord := &route53fern.ResourceRecord{
@@ -247,8 +271,10 @@ func EnumerateRoute53(ctx context.Context, awscfg aws.Config, config route53fern
 	log := svc1log.FromContext(ctx)
 	log.Info("Starting Route53 enumeration")
 
-	// Set the region to us-east-1 for since Route53 is a global resounce and ignore the region data
-	awscfg.Region = REGION
+	// Let the SDK select the global endpoint and signing region for the configured partition.
+	if awscfg.Region == "" {
+		awscfg.Region = REGION
+	}
 
 	// Initialize Report
 	report := route53fern.Route53EnumerateReport{
@@ -293,4 +319,12 @@ func resourceInfoForRecordSets(records []*route53fern.ResourceRecordSet) *route5
 	return &route53fern.HostedZoneResourceInfo{
 		RecordSets: records,
 	}
+}
+
+func canonicalHostedZoneID(id string) string {
+	id = strings.TrimPrefix(id, "/hostedzone/")
+	if id == "" || strings.ContainsAny(id, "/ \t\r\n") {
+		return ""
+	}
+	return id
 }

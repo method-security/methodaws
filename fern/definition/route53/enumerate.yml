@@ -1,6 +1,3 @@
-imports:
-  common: ../common/resources.yml
-
 types:
   # DNS Record Types Enum
   RecordType:
@@ -37,10 +34,12 @@ types:
       description: optional<string>
   ResourceRecord:
     properties:
+      # Raw DNS RDATA interpreted using the parent record type, not always an IP or hostname.
       value: string
   AliasTarget:
     properties:
       dnsName: string
+      # Target hosted zone or AWS service canonical zone; not necessarily a zone owned by this account.
       hostedZoneId: string
       evaluateTargetHealth: boolean
   GeoLocation:
@@ -53,6 +52,7 @@ types:
       collectionId: string
       locationName: string
   ResourceRecordSet:
+    # Identity is the enclosing hosted-zone ID plus name, type, and setIdentifier when present.
     properties:
       name: string
       type: RecordType
@@ -64,26 +64,25 @@ types:
       multiValueAnswer: optional<boolean>
       region: optional<string>
       resourceRecords: optional<list<ResourceRecord>>
+      # Required for non-simple routing; absent for simple records.
       setIdentifier: optional<string>
       ttl: optional<integer>
       weight: optional<integer>
 # Hosted Zone High level Structs
   HostedZoneIdentificationInfo:
     properties:
-      callerReference: string
+      # Canonical AWS zone ID without the /hostedzone/ API path prefix.
       id: string
       name: string
   HostedZoneConfigurationInfo:
     properties:
+      callerReference: optional<string>
       hostedZone: optional<HostedZone>
       linkedService: optional<LinkedService>
       resourceRecordSetCount: optional<integer>
   HostedZoneResourceInfo:
     properties:
       recordSets: list<ResourceRecordSet>
-      loadBalancers: optional<list<common.LoadBalancerReference>>
-      cloudFrontDistributions: optional<list<common.CloudFrontDistributionReference>>
-      s3Buckets: optional<list<common.S3BucketReference>>
 # Main Hosted Zone Structs
   EnrichedHostedZone:
     properties:
