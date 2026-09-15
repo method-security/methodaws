@@ -17,7 +17,13 @@ func TestCreateCloudWatchLogReferencesUsesEffectiveLogGroupAndSourceIdentity(t *
 		expectedName  string
 	}{
 		{
-			name:         "default log group",
+			name: "missing logging configuration",
+		},
+		{
+			name: "configured default log group",
+			loggingConfig: &lambdafern.LambdaLoggingConfig{
+				LogGroup: "/aws/lambda/example",
+			},
 			expectedName: "/aws/lambda/example",
 		},
 		{
@@ -35,12 +41,15 @@ func TestCreateCloudWatchLogReferencesUsesEffectiveLogGroupAndSourceIdentity(t *
 
 			references, err := createCloudWatchLogReferences(
 				test.loggingConfig,
-				"example",
 				"arn:aws:lambda:us-east-1:123456789012:function:example",
 				"us-east-1",
 			)
 
 			require.NoError(t, err)
+			if test.expectedName == "" {
+				assert.Empty(t, references)
+				return
+			}
 			require.Len(t, references, 1)
 			assert.Equal(t, test.expectedName, references[0].LogGroupName)
 			assert.Equal(

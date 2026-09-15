@@ -22,8 +22,21 @@ types:
       - JSON
   LambdaLoggingConfig:
     properties:
-      logFormat: LambdaLoggingFormat
+      logFormat: optional<LambdaLoggingFormat>
       logGroup: string
+  LambdaUrlAuthType:
+    enum:
+      - NONE
+      - AWS_IAM
+  LambdaFunctionUrlConfig:
+    properties:
+      url: string
+      # Absent for the parent function's unpublished version; otherwise the URL's target alias.
+      alias: optional<string>
+      # Authentication mode alone does not establish public access.
+      authType: optional<LambdaUrlAuthType>
+      # Resource-based policy for the parent function or the target alias, not an endpoint policy.
+      resourcePolicy: optional<string>
 # Lambda High level structs
   LambdaIdentificationInfo:
     properties:
@@ -32,24 +45,28 @@ types:
       region: string
   LambdaConfigurationInfo:
     properties:
-      revisionId: string
-      runtime: string
-      handler: string
+      revisionId: optional<string>
+      runtime: optional<string>
+      handler: optional<string>
       codeSizeInBytes: long
-      timeoutInSeconds: integer
-      memorySizeInMb: integer
-      ephemeralStorageInMb: integer
-      lastModified: datetime
-      packageType: LambdaPackageType
+      timeoutInSeconds: optional<integer>
+      memorySizeInMb: optional<integer>
+      ephemeralStorageInMb: optional<integer>
+      lastModified: optional<datetime>
+      packageType: optional<LambdaPackageType>
       description: optional<string>
       codeSha256: optional<string>
       architectures: optional<list<LambdaArchitecture>>
       loggingConfig: optional<LambdaLoggingConfig>
+      # Resource-based policy for the unqualified parent function.
+      resourcePolicy: optional<string>
   LambdaResourceInfo:
     properties:
+      functionUrls: optional<list<LambdaFunctionUrlConfig>>
       vpc: optional<common.VpcReference>
       iamRole: optional<common.IamRoleReference>
       securityGroups: optional<list<common.SecurityGroupReference>>
+      # Configured destinations, not proof of log group existence or successful delivery.
       cloudWatchLogs: optional<list<common.CloudWatchLogReference>>
 # Lambda Main Structs
   LambdaFunction:
