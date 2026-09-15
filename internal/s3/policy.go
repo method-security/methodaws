@@ -390,11 +390,20 @@ func denyCoversAllowedResource(statement policyStatement, allowedResourcePattern
 		return false
 	}
 	for _, deniedResourcePattern := range statement.Resource {
-		if deniedResourcePattern == "*" || deniedResourcePattern == allowedResourcePattern {
+		if deniedResourcePattern == "*" || deniedResourcePattern == allowedResourcePattern ||
+			trailingWildcardPatternCovers(deniedResourcePattern, allowedResourcePattern) {
 			return true
 		}
 	}
 	return false
+}
+
+func trailingWildcardPatternCovers(coveringPattern, coveredPattern string) bool {
+	if !strings.HasSuffix(coveringPattern, "*") {
+		return false
+	}
+	prefix := strings.TrimSuffix(coveringPattern, "*")
+	return !strings.ContainsAny(prefix, "*?") && strings.HasPrefix(coveredPattern, prefix)
 }
 
 var anonymousUserIDVariable = regexp.MustCompile(`(?i)\$\{aws:userid\}`)

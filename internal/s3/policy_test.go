@@ -132,6 +132,27 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: boolPointer(false),
 		},
 		{
+			name: "parent prefix deny overrides public child prefix",
+			policy: `{
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": "*",
+							"Action": "s3:GetObject",
+							"Resource": "arn:aws:s3:::example-bucket/public/*"
+						},
+						{
+							"Effect": "Deny",
+							"Principal": "*",
+							"Action": "s3:GetObject",
+							"Resource": "arn:aws:s3:::example-bucket/*"
+						}
+					]
+				}`,
+			publicRead:  boolPointer(false),
+			publicWrite: boolPointer(false),
+		},
+		{
 			name: "deny on probe key does not hide a broader public prefix",
 			policy: `{
 				"Statement": [
