@@ -75,6 +75,28 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: nil,
 		},
 		{
+			name: "policy variable deny for another bucket does not affect public access",
+			policy: `{
+					"Version": "2012-10-17",
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": "*",
+							"Action": "s3:GetObject",
+							"Resource": "arn:aws:s3:::example-bucket/*"
+						},
+						{
+							"Effect": "Deny",
+							"Principal": "*",
+							"Action": "s3:GetObject",
+							"Resource": "arn:aws:s3:::different-bucket/${aws:username}/*"
+						}
+					]
+				}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
 			name: "deny on the same object prefix overrides public access",
 			policy: `{
 				"Statement": [

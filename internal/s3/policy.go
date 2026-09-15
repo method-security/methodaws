@@ -399,7 +399,9 @@ func valuesMatch(values, excludedValues []string, candidate string, caseInsensit
 	unknown := false
 	for _, value := range values {
 		if strings.Contains(value, "${") {
-			unknown = true
+			if policyVariablePatternCouldMatch(value, candidate, caseInsensitive) {
+				unknown = true
+			}
 			continue
 		}
 		if wildcardMatch(value, candidate, caseInsensitive) {
@@ -410,6 +412,11 @@ func valuesMatch(values, excludedValues []string, candidate string, caseInsensit
 		return matchUnknown
 	}
 	return matchNo
+}
+
+func policyVariablePatternCouldMatch(pattern, candidate string, caseInsensitive bool) bool {
+	variableStart := strings.Index(pattern, "${")
+	return variableStart >= 0 && wildcardMatch(pattern[:variableStart]+"*", candidate, caseInsensitive)
 }
 
 func wildcardMatch(pattern, value string, caseInsensitive bool) bool {
