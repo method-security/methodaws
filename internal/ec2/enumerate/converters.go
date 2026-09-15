@@ -50,7 +50,7 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 	if len(awsInstance.SecurityGroups) > 0 {
 		securityGroupIds = extractSecurityGroupIds(awsInstance.SecurityGroups)
 	}
-	// EC2 exposes an instance profile, not the IAM role attached to that profile, so no role is inferred here.
+	// Instance-profile roles are resolved separately during enumeration.
 
 	// Create DNS data
 	var dnsData *ec2.DnsData

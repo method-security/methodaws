@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ec2aws "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	iamaws "github.com/aws/aws-sdk-go-v2/service/iam"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
@@ -26,11 +27,12 @@ func InternalEnumerateEc2(ctx context.Context, awsConfig aws.Config, config ec2.
 
 	var allInstances []*ec2.Ec2Instance
 	var allErrors []string
+	profileCache := make(instanceProfileCache)
 
 	// Enumerate instances across all regions
 	for _, region := range config.Regions {
 		log.Info("Enumerating ec2 instances for region", svc1log.SafeParam("region", region))
-		instances, errs := enumerateEc2ForRegion(ctx, awsConfig, region)
+		instances, errs := enumerateEc2ForRegion(ctx, awsConfig, region, profileCache)
 
 		if len(instances) > 0 {
 			allInstances = append(allInstances, instances...)
@@ -64,7 +66,7 @@ func InternalEnumerateEc2(ctx context.Context, awsConfig aws.Config, config ec2.
 }
 
 // enumerateEc2ForRegion retrieves all ec2 instances for a specific region
-func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region string) ([]*ec2.Ec2Instance, []string) {
+func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region string, profileCache instanceProfileCache) ([]*ec2.Ec2Instance, []string) {
 	log := svc1log.FromContext(ctx)
 	var instances []*ec2.Ec2Instance
 	var errors []string
@@ -73,6 +75,7 @@ func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region str
 	regionConfig := awsConfig.Copy()
 	regionConfig.Region = region
 	client := ec2aws.NewFromConfig(regionConfig)
+	iamClient := iamaws.NewFromConfig(regionConfig)
 
 	// Get all instances
 	awsInstances, errs := getAllInstances(ctx, client, region)
@@ -86,6 +89,11 @@ func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region str
 	for _, awsInstance := range awsInstances {
 		instance, errs := processInstance(ctx, awsInstance, region)
 		if instance != nil {
+			role, err := profileCache.resolveRole(ctx, iamClient, awsInstance.IamInstanceProfile, region)
+			if err != nil {
+				errs = append(errs, err.Error())
+			}
+			instance.Resources.IamRole = role
 			instances = append(instances, instance)
 		}
 		for _, err := range errs {
