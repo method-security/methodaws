@@ -162,7 +162,7 @@ func enumerateWAFForScope(
 		if awsScope == types.ScopeRegional {
 			resourceArns, resourceErrors := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
 			errors = append(errors, resourceErrors...)
-			resourceInfo.LoadBalancer, resourceInfo.ApiGateway = referencesFromResourceARNs(resourceArns, region)
+			resourceInfo.LoadBalancers, resourceInfo.ApiGateways = referencesFromResourceARNs(resourceArns, region)
 		}
 
 		waf := waffern.WafInstance{
@@ -358,26 +358,29 @@ func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string
 	return resourceARNs, errors
 }
 
-func referencesFromResourceARNs(resourceARNs []string, region string) (*common.LoadBalancerReference, *common.ApiGatewayReference) {
-	var loadBalancer *common.LoadBalancerReference
-	var apiGateway *common.ApiGatewayReference
+func referencesFromResourceARNs(
+	resourceARNs []string,
+	region string,
+) ([]*common.LoadBalancerReference, []*common.ApiGatewayReference) {
+	var loadBalancers []*common.LoadBalancerReference
+	var apiGateways []*common.ApiGatewayReference
 	for _, resourceARN := range resourceARNs {
-		if loadBalancer == nil && strings.Contains(resourceARN, ":elasticloadbalancing:") &&
+		if strings.Contains(resourceARN, ":elasticloadbalancing:") &&
 			strings.Contains(resourceARN, ":loadbalancer/app/") {
-			loadBalancer = &common.LoadBalancerReference{
+			loadBalancers = append(loadBalancers, &common.LoadBalancerReference{
 				Arn:    resourceARN,
 				Region: region,
 				Type:   common.LoadBalancerTypeApplication,
-			}
+			})
 		}
-		if apiGateway == nil && strings.Contains(resourceARN, ":apigateway:") && strings.Contains(resourceARN, "/restapis/") {
+		if strings.Contains(resourceARN, ":apigateway:") && strings.Contains(resourceARN, "/restapis/") {
 			apiID := extractAPIGatewayIDFromArn(resourceARN)
 			if apiID != "" {
-				apiGateway = &common.ApiGatewayReference{Arn: resourceARN, ApiId: &apiID, Region: region}
+				apiGateways = append(apiGateways, &common.ApiGatewayReference{Arn: resourceARN, ApiId: &apiID, Region: region})
 			}
 		}
 	}
-	return loadBalancer, apiGateway
+	return loadBalancers, apiGateways
 }
 
 func extractAPIGatewayIDFromArn(arn string) string {

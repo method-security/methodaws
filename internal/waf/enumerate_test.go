@@ -52,11 +52,13 @@ func (s *stubWAFClient) ListResourcesForWebACL(
 	}
 	if input.ResourceType == types.ResourceTypeApplicationLoadBalancer {
 		return &wafv2.ListResourcesForWebACLOutput{ResourceArns: []string{
-			"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/example/abc",
+			"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/first/abc",
+			"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/second/def",
 		}}, nil
 	}
 	return &wafv2.ListResourcesForWebACLOutput{ResourceArns: []string{
-		"arn:aws:apigateway:us-east-1::/restapis/api-id/stages/prod",
+		"arn:aws:apigateway:us-east-1::/restapis/first-api/stages/prod",
+		"arn:aws:apigateway:us-east-1::/restapis/second-api/stages/prod",
 	}}, nil
 }
 
@@ -83,8 +85,9 @@ func TestResourcesForWebACLContinuesAfterOneResourceTypeFails(t *testing.T) {
 
 	require.Equal(t, []string{"load balancer associations denied"}, errs)
 	assert.Equal(t, 2, client.resourceListCalls)
-	require.Len(t, resources, 1)
+	require.Len(t, resources, 2)
 	assert.Contains(t, resources[0], ":apigateway:")
+	assert.Contains(t, resources[1], ":apigateway:")
 }
 
 func TestEnumerateWAFForScopePaginatesAndListsAssociationsOnce(t *testing.T) {
@@ -108,8 +111,14 @@ func TestEnumerateWAFForScopePaginatesAndListsAssociationsOnce(t *testing.T) {
 		types.ResourceTypeApplicationLoadBalancer,
 		types.ResourceTypeApiGateway,
 	}, client.resourceTypes)
-	assert.NotNil(t, wafs[0].Resources.LoadBalancer)
-	assert.NotNil(t, wafs[0].Resources.ApiGateway)
+	require.Len(t, wafs[0].Resources.LoadBalancers, 2)
+	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/first/abc",
+		wafs[0].Resources.LoadBalancers[0].Arn)
+	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/second/def",
+		wafs[0].Resources.LoadBalancers[1].Arn)
+	require.Len(t, wafs[0].Resources.ApiGateways, 2)
+	assert.Equal(t, "first-api", *wafs[0].Resources.ApiGateways[0].ApiId)
+	assert.Equal(t, "second-api", *wafs[0].Resources.ApiGateways[1].ApiId)
 }
 
 func TestEnumerateCloudFrontWAFDoesNotListRegionalAssociations(t *testing.T) {
