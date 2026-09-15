@@ -24,6 +24,19 @@ types:
     properties:
       logFormat: optional<LambdaLoggingFormat>
       logGroup: string
+  LambdaUrlAuthType:
+    enum:
+      - NONE
+      - AWS_IAM
+  LambdaFunctionUrlConfig:
+    properties:
+      url: string
+      # Absent for the parent function's unpublished version; otherwise the URL's target alias.
+      alias: optional<string>
+      # Authentication mode alone does not establish public access.
+      authType: optional<LambdaUrlAuthType>
+      # Resource-based policy for the parent function or the target alias, not an endpoint policy.
+      resourcePolicy: optional<string>
 # Lambda High level structs
   LambdaIdentificationInfo:
     properties:
@@ -45,6 +58,9 @@ types:
       codeSha256: optional<string>
       architectures: optional<list<LambdaArchitecture>>
       loggingConfig: optional<LambdaLoggingConfig>
+      # Resource-based policy for the unqualified parent function.
+      resourcePolicy: optional<string>
+      functionUrls: optional<list<LambdaFunctionUrlConfig>>
   LambdaResourceInfo:
     properties:
       vpc: optional<common.VpcReference>

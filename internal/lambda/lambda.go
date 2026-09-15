@@ -181,6 +181,10 @@ func enumerateLambdaForRegion(ctx context.Context, awsConfig aws.Config, region 
 				errors = append(errors, wrappedErr)
 			}
 			if parsedFunction != nil {
+				for _, enrichmentErr := range enrichFunctionURLs(ctx, lambdaClient, parsedFunction) {
+					errors = append(errors, fmt.Errorf("function %s (%s) in region %s: %w",
+						parsedFunction.Identification.Name, parsedFunction.Identification.Arn, region, enrichmentErr))
+				}
 				functions = append(functions, parsedFunction)
 			}
 		}
