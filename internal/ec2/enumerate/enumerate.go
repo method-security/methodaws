@@ -84,16 +84,13 @@ func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region str
 
 	// Process each instance
 	for _, awsInstance := range awsInstances {
-		if awsInstance.InstanceId == nil {
-			log.Warn("Instance ID is nil for instance", svc1log.SafeParam("instance", awsInstance))
-			errors = append(errors, "Instance ID is nil")
-			continue
-		}
 		instance, errs := processInstance(ctx, awsInstance, region)
 		if instance != nil {
 			instances = append(instances, instance)
 		}
-		errors = append(errors, errs...)
+		for _, err := range errs {
+			errors = append(errors, fmt.Sprintf("Instance %s in region %s: %s", aws.ToString(awsInstance.InstanceId), region, err))
+		}
 	}
 
 	return instances, errors
@@ -125,14 +122,6 @@ func getAllInstances(ctx context.Context, client *ec2aws.Client, region string) 
 func processInstance(ctx context.Context, awsInstance types.Instance, region string) (*ec2.Ec2Instance, []string) {
 	log := svc1log.FromContext(ctx)
 	log.Info("Processing ec2aws instance", svc1log.SafeParam("instanceId", awsInstance.InstanceId))
-	var errors []string
-
-	// Convert instance
-	fernInstance, err := convertInstanceToFern(ctx, awsInstance, region)
-	if err != nil {
-		errors = append(errors, err...)
-		return nil, errors
-	}
-
-	return fernInstance, errors
+	// Child conversion errors must not discard an identified instance.
+	return convertInstanceToFern(ctx, awsInstance, region)
 }
