@@ -584,10 +584,14 @@ func classifyAllowConditionEntry(operator, key string, rawValues json.RawMessage
 			if err != nil || len(values) != 1 {
 				return conditionUnknown
 			}
-			if strings.EqualFold(values[0], "false") {
+			switch {
+			case strings.EqualFold(values[0], "false"):
 				return conditionRestricted
+			case strings.EqualFold(values[0], "true"):
+				return conditionPublic
+			default:
+				return conditionUnknown
 			}
-			return conditionPublic
 		}
 		if isPositiveConditionOperator(operator) {
 			fixed, err := conditionValuesAreFixed(rawValues)
@@ -828,6 +832,20 @@ func classifyDenyCondition(condition map[string]map[string]json.RawMessage) deny
 		for key, rawValues := range entries {
 			if _, ok := trustedConditionKeys[strings.ToLower(key)]; !ok {
 				return denyUnknown
+			}
+			if strings.EqualFold(operator, "Null") {
+				values, err := decodeStringList(rawValues)
+				if err != nil || len(values) != 1 {
+					return denyUnknown
+				}
+				switch {
+				case strings.EqualFold(values[0], "true"):
+					return denyBlocksPublic
+				case strings.EqualFold(values[0], "false"):
+					return denyDoesNotBlockPublic
+				default:
+					return denyUnknown
+				}
 			}
 			fixed, err := conditionValuesAreFixed(rawValues)
 			if err != nil || !fixed {

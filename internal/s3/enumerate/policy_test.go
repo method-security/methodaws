@@ -467,6 +467,50 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicRead:  boolPointer(false),
 			publicWrite: boolPointer(false),
 		},
+		{
+			name: "Null true deny applies when the trusted key is absent",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*",
+						"Condition": {"Null": {"aws:PrincipalOrgID": "true"}}
+					}
+				]
+			}`,
+			publicRead:  boolPointer(false),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "Null false deny does not apply when the trusted key is absent",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*",
+						"Condition": {"Null": {"aws:PrincipalOrgID": "false"}}
+					}
+				]
+			}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
 	}
 
 	for _, test := range tests {
