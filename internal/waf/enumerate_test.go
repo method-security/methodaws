@@ -90,7 +90,8 @@ func TestResourcesForWebACLContinuesAfterOneResourceTypeFails(t *testing.T) {
 	}}
 	resources, errs := resourcesForWebACL(context.Background(), client, aws.String("web-acl"), "us-east-1")
 
-	require.Equal(t, []string{"load balancer associations denied"}, errs)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "load balancer associations denied")
 	assert.Equal(t, 2, client.resourceListCalls)
 	require.Len(t, resources, 2)
 	assert.Contains(t, resources[0], ":apigateway:")
@@ -123,9 +124,12 @@ func TestEnumerateWAFForScopePaginatesAndListsAssociationsOnce(t *testing.T) {
 		wafs[0].Resources.LoadBalancers[0].Arn)
 	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/second/def",
 		wafs[0].Resources.LoadBalancers[1].Arn)
-	require.Len(t, wafs[0].Resources.ApiGateways, 2)
-	assert.Equal(t, "first-api", *wafs[0].Resources.ApiGateways[0].ApiId)
-	assert.Equal(t, "second-api", *wafs[0].Resources.ApiGateways[1].ApiId)
+	require.Len(t, wafs[0].Resources.ApiGatewayStages, 2)
+	assert.Equal(t, "first-api", *wafs[0].Resources.ApiGatewayStages[0].Api.ApiId)
+	assert.Equal(t, "second-api", *wafs[0].Resources.ApiGatewayStages[1].Api.ApiId)
+	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api", wafs[0].Resources.ApiGatewayStages[0].Api.Arn)
+	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api/stages/prod", wafs[0].Resources.ApiGatewayStages[0].StageArn)
+	assert.Equal(t, "prod", wafs[0].Resources.ApiGatewayStages[0].StageName)
 }
 
 func TestEnumerateCloudFrontWAFDoesNotListRegionalAssociations(t *testing.T) {
@@ -168,5 +172,6 @@ func TestEnumerateWAFSkipsRuleWithMissingStatement(t *testing.T) {
 	require.Len(t, wafs, 1)
 	require.Len(t, wafs[0].Resources.Rules, 1)
 	assert.Equal(t, "valid", wafs[0].Resources.Rules[0].Identification.Name)
-	assert.Contains(t, errs, "WAF Rule incomplete Statement is nil")
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "WAF Rule incomplete Statement is nil")
 }
