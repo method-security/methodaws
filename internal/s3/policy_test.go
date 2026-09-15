@@ -337,6 +337,42 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: boolPointer(false),
 		},
 		{
+			name: "positive IfExists allow applies when the key is absent",
+			policy: `{
+				"Statement": [{
+					"Effect": "Allow",
+					"Principal": "*",
+					"Action": "s3:GetObject",
+					"Resource": "arn:aws:s3:::example-bucket/*",
+					"Condition": {"StringEqualsIfExists": {"aws:SourceVpc": "vpc-12345678"}}
+				}]
+			}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "set-qualified positive IfExists deny applies when the key is absent",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*",
+						"Condition": {"ForAnyValue:StringEqualsIfExists": {"aws:SourceVpc": "vpc-12345678"}}
+					}
+				]
+			}`,
+			publicRead:  boolPointer(false),
+			publicWrite: boolPointer(false),
+		},
+		{
 			name: "Null check makes ForAllValues require the trusted key",
 			policy: `{
 				"Statement": [{

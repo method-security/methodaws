@@ -484,6 +484,10 @@ func classifyAllowConditionEntry(operator, key string, rawValues json.RawMessage
 		return classifySourceIPCondition(operator, rawValues)
 	}
 	if _, ok := trustedConditionKeys[normalizedKey]; ok {
+		if isPositiveIfExistsOperator(operator) {
+			// IfExists makes the condition true when an anonymous request omits the key.
+			return conditionPublic
+		}
 		if isForAllValuesPositiveOperator(operator) {
 			// ForAllValues is true for a missing request key unless a separate Null condition requires it.
 			return conditionPublic
@@ -553,6 +557,17 @@ func isPositiveConditionOperator(operator string) bool {
 		return false
 	}
 	operator = strings.TrimPrefix(operator, "foranyvalue:")
+	return operator == "stringequals" || operator == "arnequals" || operator == "stringlike" || operator == "arnlike"
+}
+
+func isPositiveIfExistsOperator(operator string) bool {
+	operator = strings.ToLower(operator)
+	if !strings.HasSuffix(operator, "ifexists") {
+		return false
+	}
+	operator = strings.TrimPrefix(operator, "foranyvalue:")
+	operator = strings.TrimPrefix(operator, "forallvalues:")
+	operator = strings.TrimSuffix(operator, "ifexists")
 	return operator == "stringequals" || operator == "arnequals" || operator == "stringlike" || operator == "arnlike"
 }
 
@@ -657,6 +672,9 @@ func classifyDenyCondition(condition map[string]map[string]json.RawMessage) deny
 			fixed, err := conditionValuesAreFixed(rawValues)
 			if err != nil || !fixed {
 				return denyUnknown
+			}
+			if isPositiveIfExistsOperator(operator) {
+				return denyBlocksPublic
 			}
 			if isForAnyValuesNegativeOperator(operator) {
 				return denyDoesNotBlockPublic
