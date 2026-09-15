@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/netip"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +17,9 @@ type policyPermissions struct {
 	anonymousACLDenies     aclPolicyDenies
 	authenticatedACLDenies aclPolicyDenies
 }
+
+// Public S3 endpoints support TLS 1.3, so minimum-version denies at or below this floor retain an allowed TLS path.
+const knownPublicS3TLSVersion = 1.3
 
 type aclPolicyDenies struct {
 	read        *bool
@@ -864,29 +869,68 @@ func conditionValuesAreFixed(rawValues json.RawMessage) (bool, error) {
 	return true, nil
 }
 
-func isTransportOnlyDeny(condition map[string]map[string]json.RawMessage) bool {
-	if len(condition) != 1 {
-		return false
-	}
+func denyConditionHasTransportBypass(condition map[string]map[string]json.RawMessage) bool {
 	for operator, entries := range condition {
-		if !strings.EqualFold(operator, "Bool") || len(entries) < 1 || len(entries) > 2 {
-			return false
-		}
-		secureTransportFound := false
 		for key, rawValue := range entries {
-			if !strings.EqualFold(key, "aws:SecureTransport") &&
-				!strings.EqualFold(key, "aws:PrincipalIsAWSService") {
-				return false
+			switch {
+			case strings.EqualFold(operator, "Bool") && strings.EqualFold(key, "aws:SecureTransport"):
+				values, err := decodeStringList(rawValue)
+				if err == nil && len(values) == 1 && strings.EqualFold(values[0], "false") {
+					return true
+				}
+			case strings.EqualFold(operator, "NumericLessThan") && strings.EqualFold(key, "s3:TlsVersion"):
+				if tlsMinimumVersionDenyHasBypass(rawValue) {
+					return true
+				}
 			}
-			values, err := decodeStringList(rawValue)
-			if err != nil || len(values) != 1 || !strings.EqualFold(values[0], "false") {
-				return false
-			}
-			secureTransportFound = secureTransportFound || strings.EqualFold(key, "aws:SecureTransport")
 		}
-		return secureTransportFound
 	}
 	return false
+}
+
+func tlsMinimumVersionDenyHasBypass(rawValues json.RawMessage) bool {
+	values, err := decodeNumericList(rawValues)
+	if err != nil || len(values) == 0 {
+		return false
+	}
+	for _, minimumVersion := range values {
+		if minimumVersion > knownPublicS3TLSVersion {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeNumericList(data []byte) ([]float64, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, err
+	}
+	values, ok := decoded.([]any)
+	if !ok {
+		values = []any{decoded}
+	}
+
+	result := make([]float64, 0, len(values))
+	for _, value := range values {
+		var rawValue string
+		switch typedValue := value.(type) {
+		case json.Number:
+			rawValue = typedValue.String()
+		case string:
+			rawValue = typedValue
+		default:
+			return nil, fmt.Errorf("expected a number or list of numbers")
+		}
+		parsedValue, err := strconv.ParseFloat(rawValue, 64)
+		if err != nil || math.IsNaN(parsedValue) || math.IsInf(parsedValue, 0) {
+			return nil, fmt.Errorf("invalid numeric condition value %q", rawValue)
+		}
+		result = append(result, parsedValue)
+	}
+	return result, nil
 }
 
 type denyConditionResult uint8
@@ -904,7 +948,7 @@ func classifyDenyCondition(
 	if len(condition) == 0 {
 		return denyBlocksPublic
 	}
-	if isTransportOnlyDeny(condition) {
+	if denyConditionHasTransportBypass(condition) {
 		return denyDoesNotBlockPublic
 	}
 	if len(condition) != 1 {

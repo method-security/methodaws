@@ -251,6 +251,79 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: boolPointer(false),
 		},
 		{
+			name: "minimum TLS version deny preserves modern TLS public access",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:*",
+						"Resource": ["arn:aws:s3:::example-bucket", "arn:aws:s3:::example-bucket/*"],
+						"Condition": {"NumericLessThan": {"s3:TlsVersion": 1.2}}
+					}
+				]
+			}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "combined transport hardening deny preserves modern TLS public access",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:*",
+						"Resource": ["arn:aws:s3:::example-bucket", "arn:aws:s3:::example-bucket/*"],
+						"Condition": {"Bool": {"aws:SecureTransport": "false"}}
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:*",
+						"Resource": ["arn:aws:s3:::example-bucket", "arn:aws:s3:::example-bucket/*"],
+						"Condition": {"NumericLessThan": {"s3:TlsVersion": 1.2}}
+					}
+				]
+			}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "unsupported TLS floor remains unknown",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*",
+						"Condition": {"NumericLessThan": {"s3:TlsVersion": "2.0"}}
+					}
+				]
+			}`,
+			publicRead:  nil,
+			publicWrite: boolPointer(false),
+		},
+		{
 			name: "fixed source ARN restricts access",
 			policy: `{
 				"Statement": [{
