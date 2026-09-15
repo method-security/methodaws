@@ -25,8 +25,8 @@ types:
       region: string
   ExternalBucketConfigurationInfo:
     properties:
-      allowDirectoryListing: boolean
-      allowAnonymousRead: boolean
+      allowDirectoryListing: optional<boolean>
+      allowAnonymousRead: optional<boolean>
       policy: optional<string>
       acls: optional<list<enumerate.S3BucketAccessControl>>
       ownerID: optional<string>

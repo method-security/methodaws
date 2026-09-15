@@ -18,6 +18,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
@@ -27,12 +28,23 @@ type headBucketAPI interface {
 }
 
 func locateBucketWithClient(ctx context.Context, client headBucketAPI, probeRegion, bucketName string) (bool, string, error) {
+	if strings.TrimSpace(bucketName) == "" {
+		return false, "", fmt.Errorf("bucket name is required")
+	}
+	for _, suffix := range []string{"-s3alias", "--ol-s3", "--x-s3", ".mrap", "--table-s3"} {
+		if strings.HasSuffix(bucketName, suffix) {
+			return false, "", fmt.Errorf("%s is not a supported general-purpose bucket name", bucketName)
+		}
+	}
 	output, err := client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(bucketName)})
 	if err == nil {
+		if output != nil && aws.ToBool(output.AccessPointAlias) {
+			return false, "", fmt.Errorf("%s is an access point alias, not a bucket name", bucketName)
+		}
 		if output != nil && output.BucketRegion != nil && *output.BucketRegion != "" {
 			return true, *output.BucketRegion, nil
 		}
-		return true, probeRegion, nil
+		return false, "", fmt.Errorf("head bucket %s in %s returned no bucket region", bucketName, probeRegion)
 	}
 
 	var responseError *smithyhttp.ResponseError
@@ -42,14 +54,11 @@ func locateBucketWithClient(ctx context.Context, client headBucketAPI, probeRegi
 			return false, "", nil
 		}
 		bucketRegion := responseError.HTTPResponse().Header.Get("X-Amz-Bucket-Region")
-		if statusCode == http.StatusForbidden {
-			if bucketRegion == "" {
-				bucketRegion = probeRegion
-			}
-			return true, bucketRegion, nil
+		if strings.EqualFold(responseError.HTTPResponse().Header.Get("X-Amz-Access-Point-Alias"), "true") {
+			return false, "", fmt.Errorf("%s is an access point alias, not a bucket name", bucketName)
 		}
 		if bucketRegion != "" && (statusCode == http.StatusMovedPermanently || statusCode == http.StatusTemporaryRedirect ||
-			statusCode == http.StatusBadRequest) {
+			statusCode == http.StatusBadRequest || statusCode == http.StatusForbidden) {
 			return true, bucketRegion, nil
 		}
 	}
@@ -142,26 +151,51 @@ func listBucketContents(ctx context.Context, client *s3.Client, bucketName strin
 }
 
 // checkListingAllowed checks if listing objects is allowed on a bucket
-func checkListingAllowed(ctx context.Context, client *s3.Client, bucketName string) bool {
+func checkListingAllowed(ctx context.Context, client *s3.Client, bucketName string) (*bool, error) {
 	maxKeys := int32(1)
 	_, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket:     aws.String(bucketName),
 		MaxKeys:    &maxKeys,
 		FetchOwner: aws.Bool(true),
 	})
-	return err == nil
+	if err == nil {
+		return aws.Bool(true), nil
+	}
+	if isAccessDenied(err) {
+		return aws.Bool(false), nil
+	}
+	return nil, fmt.Errorf("anonymous listing probe for bucket %s: %w", bucketName, err)
 }
 
 // checkAnonymousReadAllowed checks if anonymous read is allowed on a bucket
-func checkAnonymousReadAllowed(ctx context.Context, client *s3.Client, bucketName string, directoryContents []*s3fern.DirectoryContents) bool {
-	if len(directoryContents) > 0 {
-		_, err := client.GetObject(ctx, &s3.GetObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(directoryContents[0].Key),
-		})
-		return err == nil
+func checkAnonymousReadAllowed(ctx context.Context, client *s3.Client, bucketName string, directoryContents []*s3fern.DirectoryContents) (*bool, error) {
+	if len(directoryContents) == 0 {
+		return nil, nil
 	}
-	return false
+	object := directoryContents[0]
+	input := &s3.GetObjectInput{Bucket: aws.String(bucketName), Key: aws.String(object.Key)}
+	if object.Size == nil || *object.Size > 0 {
+		input.Range = aws.String("bytes=0-0")
+	}
+	output, err := client.GetObject(ctx, input)
+	if err != nil {
+		if isAccessDenied(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("anonymous read probe for bucket %s key %q: %w", bucketName, object.Key, err)
+	}
+	if output == nil || output.Body == nil {
+		return nil, fmt.Errorf("anonymous read probe for bucket %s key %q returned no body", bucketName, object.Key)
+	}
+	if err := output.Body.Close(); err != nil {
+		return aws.Bool(true), fmt.Errorf("closing anonymous read probe for bucket %s key %q: %w", bucketName, object.Key, err)
+	}
+	return aws.Bool(true), nil
+}
+
+func isAccessDenied(err error) bool {
+	var apiError smithy.APIError
+	return errors.As(err, &apiError) && apiError.ErrorCode() == "AccessDenied"
 }
 
 // checkPolicy checks the bucket policy
@@ -292,12 +326,11 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 }
 
 // EnumerateS3Region enumerates a single public facing S3 bucket in a specific region
-func externalS3Region(ctx context.Context, bucketURL string, bucketName string, region string) (*s3fern.ExternalS3BucketResult, []string) {
+func externalS3Region(ctx context.Context, bucketName string, region string) (*s3fern.ExternalS3BucketResult, []string) {
 	log := svc1log.FromContext(ctx)
 	log.Info("Starting external S3 bucket enumeration",
 		svc1log.SafeParam("bucketName", bucketName),
-		svc1log.SafeParam("region", region),
-		svc1log.SafeParam("bucketURL", bucketURL))
+		svc1log.SafeParam("region", region))
 
 	// Initialize variables
 	report := s3fern.ExternalS3BucketResult{}
@@ -306,6 +339,14 @@ func externalS3Region(ctx context.Context, bucketURL string, bucketName string, 
 	bucketARN, err := utils.BuildGlobalARNForRegion(region, "s3", "", bucketName)
 	if err != nil {
 		return nil, []string{err.Error()}
+	}
+	dnsSuffix, err := utils.AWSDNSSuffixForRegion(region)
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+	bucketURL := fmt.Sprintf("https://%s.s3.%s.%s", bucketName, region, dnsSuffix)
+	if strings.ContainsAny(bucketName, "._") || bucketName != strings.ToLower(bucketName) {
+		bucketURL = fmt.Sprintf("https://s3.%s.%s/%s", region, dnsSuffix, bucketName)
 	}
 
 	externalBucket := s3fern.ExternalBucket{
@@ -348,15 +389,21 @@ func externalS3Region(ctx context.Context, bucketURL string, bucketName string, 
 	client := s3.NewFromConfig(cfg)
 
 	// Check if listing is allowed and get directory contents
-	externalBucket.Configuration.AllowDirectoryListing = checkListingAllowed(ctx, client, bucketName)
-	if externalBucket.Configuration.AllowDirectoryListing {
+	externalBucket.Configuration.AllowDirectoryListing, err = checkListingAllowed(ctx, client, bucketName)
+	if err != nil {
+		errors = append(errors, err.Error())
+	}
+	if aws.ToBool(externalBucket.Configuration.AllowDirectoryListing) {
 		directoryContents, err := listBucketContents(ctx, client, bucketName)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("error listing bucket contents: %v", err))
 		} else {
 			externalBucket.Resources.DirectoryContents = directoryContents
 			// Check anonymous read access if we found any objects
-			externalBucket.Configuration.AllowAnonymousRead = checkAnonymousReadAllowed(ctx, client, bucketName, directoryContents)
+			externalBucket.Configuration.AllowAnonymousRead, err = checkAnonymousReadAllowed(ctx, client, bucketName, directoryContents)
+			if err != nil {
+				errors = append(errors, err.Error())
+			}
 		}
 	}
 
@@ -464,7 +511,7 @@ func EnumerateS3(ctx context.Context, config s3fern.S3ExternalConfig) s3fern.Ext
 			log.Info("Found bucket in region",
 				svc1log.SafeParam("bucketName", bucketName),
 				svc1log.SafeParam("region", bucketRegion))
-			functionResult, functionErrors := externalS3Region(ctx, bucketURL, bucketName, bucketRegion)
+			functionResult, functionErrors := externalS3Region(ctx, bucketName, bucketRegion)
 			if functionResult != nil {
 				result = *functionResult
 			}
@@ -478,7 +525,7 @@ func EnumerateS3(ctx context.Context, config s3fern.S3ExternalConfig) s3fern.Ext
 		log.Warn("Bucket not found in any specified regions",
 			svc1log.SafeParam("bucketName", bucketName),
 			svc1log.SafeParam("regionsChecked", len(regionsToCheck)))
-		errors = append(errors, "Bucket not found in any of the specified regions")
+		errors = append(errors, "Could not confirm a supported bucket in the requested regions")
 	}
 
 	report.Result = &result

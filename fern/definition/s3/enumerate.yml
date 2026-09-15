@@ -64,6 +64,27 @@ types:
     properties:
       sseAlgorithm: optional<S3ServerSideEncryption>
       kmsKey: optional<common.KmsKeyReference>
+  S3PolicyRoleReference:
+    properties:
+      arn: string
+      roleName: optional<string>
+  S3IamRolePolicyStatement:
+    properties:
+      statement: string
+      principalRoles: optional<list<S3PolicyRoleReference>>
+      notPrincipalRoles: optional<list<S3PolicyRoleReference>>
+      conditionRoles: optional<list<S3PolicyRoleReference>>
+  S3NotificationFilterRule:
+    properties:
+      name: string
+      value: string
+  S3LambdaNotification:
+    properties:
+      # Identifies the notification configuration within this bucket; function.arn identifies the Lambda function.
+      id: optional<string>
+      function: common.LambdaReference
+      events: list<string>
+      filterRules: optional<list<S3NotificationFilterRule>>
 # S3 High level structs
   S3BucketIdentificationInfo:
     properties:
@@ -83,8 +104,8 @@ types:
       accessControl: optional<S3BucketAccessControl>
   S3BucketResourceInfo:
     properties:
-      iamRoles: optional<list<common.IamRoleReference>>
-      lambdaFunctions: optional<list<common.LambdaReference>>
+      iamRolePolicyStatements: optional<list<S3IamRolePolicyStatement>>
+      lambdaNotifications: optional<list<S3LambdaNotification>>
 # Main S3 Bucket Structs
   S3Bucket:
     properties:
