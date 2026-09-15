@@ -34,47 +34,30 @@ func TestEnabledAWSRegionsSortsDeduplicatesAndSkipsMissingNames(t *testing.T) {
 			{RegionName: aws.String("us-east-1")},
 			{RegionName: aws.String("us-west-2")},
 		}},
-	}, nil)
+	})
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"us-east-1", "us-west-2"}, regions)
 }
 
-func TestEnabledAWSRegionsValidatesSelectedRegions(t *testing.T) {
-	client := stubDescribeRegionsClient{output: &ec2.DescribeRegionsOutput{Regions: []types.Region{
-		{RegionName: aws.String("us-west-2")},
-		{RegionName: aws.String("us-east-1")},
-	}}}
-
-	regions, err := enabledAWSRegions(context.Background(), client, []string{"us-west-2", "us-west-2"})
+func TestNormalizeSelectedRegions(t *testing.T) {
+	regions, err := normalizeSelectedRegions([]string{"us-west-2", "mx-central-1", "us-west-2"})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"us-west-2"}, regions)
+	assert.Equal(t, []string{"mx-central-1", "us-west-2"}, regions)
 
-	_, err = enabledAWSRegions(context.Background(), client, []string{"us-east-2"})
-	require.EqualError(t, err, "AWS regions are not enabled or do not exist: us-east-2")
+	_, err = normalizeSelectedRegions([]string{"us-east-1", "us-gov-west-1"})
+	require.EqualError(t, err, "selected AWS regions must belong to one partition")
+
+	_, err = normalizeSelectedRegions([]string{""})
+	require.EqualError(t, err, "at least one AWS region must be selected")
 }
 
 func TestEnabledAWSRegionsHandlesMissingResponseAndErrors(t *testing.T) {
-	_, err := enabledAWSRegions(context.Background(), stubDescribeRegionsClient{}, nil)
+	_, err := enabledAWSRegions(context.Background(), stubDescribeRegionsClient{})
 	require.EqualError(t, err, "describe enabled AWS regions returned no response")
 
-	_, err = enabledAWSRegions(context.Background(), stubDescribeRegionsClient{err: errors.New("denied")}, nil)
+	_, err = enabledAWSRegions(context.Background(), stubDescribeRegionsClient{err: errors.New("denied")})
 	require.EqualError(t, err, "describe enabled AWS regions: denied")
-}
-
-func TestRegionDiscoveryQueryRegionUsesSelectedPartition(t *testing.T) {
-	t.Parallel()
-
-	region, err := regionDiscoveryQueryRegion("us-east-1", []string{"us-gov-west-1", "us-gov-east-1"})
-	require.NoError(t, err)
-	assert.Equal(t, "us-gov-west-1", region)
-
-	region, err = regionDiscoveryQueryRegion("", []string{"cn-north-1"})
-	require.NoError(t, err)
-	assert.Equal(t, "cn-north-1", region)
-
-	_, err = regionDiscoveryQueryRegion("", []string{"us-east-1", "us-gov-west-1"})
-	require.EqualError(t, err, "selected AWS regions must belong to one partition")
 }
 
 func TestGeneralRegionsAreSortedAndDeduplicated(t *testing.T) {

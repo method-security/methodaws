@@ -3,10 +3,13 @@ package utils
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
 )
+
+var awsRegionPattern = regexp.MustCompile(`^[a-z]{2,}(?:-[a-z0-9]+)+-[0-9]+$`)
 
 // BuildRelatedARN builds an ARN using the partition and account from an authoritative source ARN.
 func BuildRelatedARN(sourceARN, service, region, resource string) (string, error) {
@@ -57,9 +60,26 @@ func BuildGlobalARNForRegion(region, service, accountID, resource string) (strin
 }
 
 func awsPartitionForRegion(region string) (string, error) {
-	partition, ok := endpoints.PartitionForRegion(endpoints.DefaultPartitions(), region)
-	if !ok {
-		return "", fmt.Errorf("no AWS partition found for region %q", region)
+	if !awsRegionPattern.MatchString(region) {
+		return "", fmt.Errorf("invalid AWS region %q", region)
 	}
-	return partition.ID(), nil
+
+	switch {
+	case strings.HasPrefix(region, "cn-"):
+		return "aws-cn", nil
+	case strings.HasPrefix(region, "us-gov-"):
+		return "aws-us-gov", nil
+	case strings.HasPrefix(region, "us-isob-"):
+		return "aws-iso-b", nil
+	case strings.HasPrefix(region, "us-iso-"):
+		return "aws-iso", nil
+	case strings.HasPrefix(region, "eu-isoe-"):
+		return "aws-iso-e", nil
+	case strings.HasPrefix(region, "us-isof-"):
+		return "aws-iso-f", nil
+	case strings.HasPrefix(region, "eusc-"):
+		return "aws-eusc", nil
+	default:
+		return "aws", nil
+	}
 }
