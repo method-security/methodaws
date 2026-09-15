@@ -7,12 +7,16 @@ import (
 
 	"github.com/Method-Security/methodaws/generated/go/common"
 	ec2 "github.com/Method-Security/methodaws/generated/go/ec2"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
 // convertInstanceToFern converts AWS EC2 Instance to Fern Ec2Instance
 func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, region string) (*ec2.Ec2Instance, []string) {
+	if aws.ToString(awsInstance.InstanceId) == "" || region == "" {
+		return nil, []string{"Instance ID or region is empty"}
+	}
 	var errors []string
 
 	// Convert instance state
@@ -46,7 +50,7 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 	if len(awsInstance.SecurityGroups) > 0 {
 		securityGroupIds = extractSecurityGroupIds(awsInstance.SecurityGroups)
 	}
-	// EC2 exposes an instance profile, not the IAM role attached to that profile, so no role is inferred here.
+	// Instance-profile roles are resolved separately during enumeration.
 
 	// Create DNS data
 	var dnsData *ec2.DnsData
@@ -92,8 +96,11 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 
 // convertInstanceState converts AWS instance state to Fern enum
 func convertInstanceState(state types.InstanceStateName) *ec2.InstanceState {
-	stateStr := strings.ToUpper(string(state))
-	fernState := ec2.InstanceState(stateStr)
+	stateStr := strings.ToUpper(strings.ReplaceAll(string(state), "-", "_"))
+	fernState, err := ec2.NewInstanceStateFromString(stateStr)
+	if err != nil {
+		return nil
+	}
 	return &fernState
 }
 
@@ -168,14 +175,9 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 	var errors []string
 	log := svc1log.FromContext(ctx)
 	for _, ni := range interfaces {
-		if ni.NetworkInterfaceId == nil {
-			log.Warn("Network interface ID is nil for network interface", svc1log.SafeParam("networkInterface", ni))
-			errors = append(errors, "Network interface ID is nil")
-			continue
-		}
-		if ni.VpcId == nil {
-			log.Warn("VPC ID is nil for network interface", svc1log.SafeParam("networkInterface", ni))
-			errors = append(errors, "VPC ID is nil")
+		if aws.ToString(ni.NetworkInterfaceId) == "" {
+			log.Warn("Network interface ID is empty", svc1log.SafeParam("networkInterface", ni))
+			errors = append(errors, "Network interface ID is empty")
 			continue
 		}
 
@@ -188,21 +190,26 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 
 		// Prepare subnet IDs if available
 		var subnetIds []string
-		if ni.SubnetId != nil {
+		if aws.ToString(ni.SubnetId) != "" {
 			subnetIds = []string{*ni.SubnetId}
 		}
 
 		// Create VPC reference
-		vpcReference := &common.VpcReference{
-			Id:        *ni.VpcId,
-			Region:    region,
-			SubnetIds: subnetIds,
+		var vpcReference *common.VpcReference
+		if aws.ToString(ni.VpcId) != "" {
+			vpcReference = &common.VpcReference{
+				Id:        *ni.VpcId,
+				Region:    region,
+				SubnetIds: subnetIds,
+			}
+		} else {
+			errors = append(errors, fmt.Sprintf("Network interface %s has no VPC ID", *ni.NetworkInterfaceId))
 		}
 
 		// Create network interface with nested structure
 		privateIPAddresses := make([]*ec2.InstancePrivateIpAddress, 0, len(ni.PrivateIpAddresses))
 		for _, privateIP := range ni.PrivateIpAddresses {
-			if privateIP.PrivateIpAddress == nil {
+			if aws.ToString(privateIP.PrivateIpAddress) == "" {
 				errors = append(errors, fmt.Sprintf("Network interface %s has a private IP assignment without an address", *ni.NetworkInterfaceId))
 				continue
 			}
@@ -234,9 +241,9 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 				PrivateIpAddresses: privateIPAddresses,
 				SourceDestCheck:    ni.SourceDestCheck,
 			},
-			Resources: &ec2.InstanceNetworkInterfaceResourceInfo{
-				Vpc: vpcReference,
-			},
+		}
+		if vpcReference != nil {
+			fernNI.Resources = &ec2.InstanceNetworkInterfaceResourceInfo{Vpc: vpcReference}
 		}
 
 		fernInterfaces = append(fernInterfaces, fernNI)
@@ -275,7 +282,7 @@ func extractSecurityGroupIds(securityGroups []types.GroupIdentifier) []string {
 	var securityGroupIds []string
 
 	for _, sg := range securityGroups {
-		if sg.GroupId != nil {
+		if aws.ToString(sg.GroupId) != "" {
 			securityGroupIds = append(securityGroupIds, *sg.GroupId)
 		}
 	}
