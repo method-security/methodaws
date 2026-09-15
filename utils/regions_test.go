@@ -34,7 +34,7 @@ func TestEnabledAWSRegionsSortsDeduplicatesAndSkipsMissingNames(t *testing.T) {
 			{RegionName: aws.String("us-east-1")},
 			{RegionName: aws.String("us-west-2")},
 		}},
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"us-east-1", "us-west-2"}, regions)
@@ -52,11 +52,41 @@ func TestNormalizeSelectedRegions(t *testing.T) {
 	require.EqualError(t, err, "at least one AWS region must be selected")
 }
 
+func TestEnabledAWSRegionsValidatesSelectedRegions(t *testing.T) {
+	client := stubDescribeRegionsClient{output: &ec2.DescribeRegionsOutput{Regions: []types.Region{
+		{RegionName: aws.String("mx-central-1")},
+		{RegionName: aws.String("us-west-2")},
+	}}}
+
+	regions, err := enabledAWSRegions(context.Background(), client, []string{"mx-central-1", "us-west-2"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"mx-central-1", "us-west-2"}, regions)
+
+	_, err = enabledAWSRegions(context.Background(), client, []string{"us-east-2"})
+	require.EqualError(t, err, "AWS regions are not enabled or do not exist: us-east-2")
+}
+
+func TestRegionDiscoveryQueryRegionUsesStablePartitionEndpoint(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"mx-central-1":   "us-east-1",
+		"us-eats-1":      "us-east-1",
+		"cn-northwest-1": "cn-north-1",
+		"us-gov-east-1":  "us-gov-west-1",
+	}
+	for selected, expected := range tests {
+		actual, err := regionDiscoveryQueryRegion("", []string{selected})
+		require.NoError(t, err)
+		assert.Equal(t, expected, actual)
+	}
+}
+
 func TestEnabledAWSRegionsHandlesMissingResponseAndErrors(t *testing.T) {
-	_, err := enabledAWSRegions(context.Background(), stubDescribeRegionsClient{})
+	_, err := enabledAWSRegions(context.Background(), stubDescribeRegionsClient{}, nil)
 	require.EqualError(t, err, "describe enabled AWS regions returned no response")
 
-	_, err = enabledAWSRegions(context.Background(), stubDescribeRegionsClient{err: errors.New("denied")})
+	_, err = enabledAWSRegions(context.Background(), stubDescribeRegionsClient{err: errors.New("denied")}, nil)
 	require.EqualError(t, err, "describe enabled AWS regions: denied")
 }
 

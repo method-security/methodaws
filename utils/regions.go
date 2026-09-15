@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -25,22 +26,22 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 
 	log.Info("Starting GetAWSRegions function")
 
+	normalizedSelectedRegions := selectedRegions
 	if len(selectedRegions) > 0 {
 		regions, err := normalizeSelectedRegions(selectedRegions)
 		if err != nil {
 			return nil, err
 		}
-		log.Info("Using selected AWS regions", svc1log.SafeParam("regions", regions))
-		return regions, nil
+		normalizedSelectedRegions = regions
 	}
 
-	queryRegion := cfg.Region
-	if queryRegion == "" {
-		queryRegion = "us-east-1"
+	queryRegion, err := regionDiscoveryQueryRegion(cfg.Region, normalizedSelectedRegions)
+	if err != nil {
+		return nil, err
 	}
 	queryConfig := cfg.Copy()
 	queryConfig.Region = queryRegion
-	regions, err := enabledAWSRegions(ctx, ec2.NewFromConfig(queryConfig))
+	regions, err := enabledAWSRegions(ctx, ec2.NewFromConfig(queryConfig), normalizedSelectedRegions)
 	if err != nil {
 		log.Error("Failed to discover enabled AWS regions", svc1log.SafeParam("region", queryRegion), svc1log.Stacktrace(err))
 		return nil, err
@@ -50,11 +51,43 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 	return regions, nil
 }
 
+func regionDiscoveryQueryRegion(configRegion string, selectedRegions []string) (string, error) {
+	if len(selectedRegions) == 0 {
+		if configRegion != "" {
+			return configRegion, nil
+		}
+		return "us-east-1", nil
+	}
+
+	partition, err := awsPartitionForRegion(selectedRegions[0])
+	if err != nil {
+		return "", err
+	}
+	switch partition {
+	case "aws-cn":
+		return "cn-north-1", nil
+	case "aws-us-gov":
+		return "us-gov-west-1", nil
+	case "aws-iso":
+		return "us-iso-east-1", nil
+	case "aws-iso-b":
+		return "us-isob-east-1", nil
+	case "aws-iso-e":
+		return "eu-isoe-west-1", nil
+	case "aws-iso-f":
+		return "us-isof-south-1", nil
+	case "aws-eusc":
+		return "eusc-de-east-1", nil
+	default:
+		return "us-east-1", nil
+	}
+}
+
 type describeRegionsAPI interface {
 	DescribeRegions(context.Context, *ec2.DescribeRegionsInput, ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error)
 }
 
-func enabledAWSRegions(ctx context.Context, client describeRegionsAPI) ([]string, error) {
+func enabledAWSRegions(ctx context.Context, client describeRegionsAPI, selectedRegions []string) ([]string, error) {
 	output, err := client.DescribeRegions(ctx, &ec2.DescribeRegionsInput{AllRegions: aws.Bool(false)})
 	if err != nil {
 		return nil, fmt.Errorf("describe enabled AWS regions: %w", err)
@@ -72,6 +105,18 @@ func enabledAWSRegions(ctx context.Context, client describeRegionsAPI) ([]string
 
 	if len(enabled) == 0 {
 		return nil, fmt.Errorf("no enabled AWS regions returned")
+	}
+	if len(selectedRegions) > 0 {
+		var unavailable []string
+		for _, region := range selectedRegions {
+			if _, ok := enabled[region]; !ok {
+				unavailable = append(unavailable, region)
+			}
+		}
+		if len(unavailable) > 0 {
+			return nil, fmt.Errorf("AWS regions are not enabled or do not exist: %s", strings.Join(unavailable, ", "))
+		}
+		return selectedRegions, nil
 	}
 	return sortedRegionNames(enabled), nil
 }
