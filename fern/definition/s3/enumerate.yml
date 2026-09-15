@@ -26,7 +26,7 @@ types:
   S3PublicAccessBlock:
     properties:
       bucket: optional<S3PublicAccessBlockConfiguration>
-      account: optional<S3PublicAccessBlockConfiguration>
+      effectiveAccount: optional<S3PublicAccessBlockConfiguration>
       effective: optional<S3PublicAccessBlockConfiguration>
   S3BucketAccessControl:
     properties:

@@ -117,20 +117,20 @@ func publicAccessBlockDetails(
 	effective effectivePublicAccessBlock,
 ) *s3fern.S3PublicAccessBlock {
 	bucket := publicAccessBlockConfiguration(bucketState)
-	account := publicAccessBlockConfiguration(accountState)
+	effectiveAccount := publicAccessBlockConfiguration(accountState)
 	effectiveConfiguration := publicAccessBlockConfigurationFromValues(
 		effective.blockPublicACLs,
 		effective.ignorePublicACLs,
 		effective.blockPublicPolicy,
 		effective.restrictPublicBuckets,
 	)
-	if bucket == nil && account == nil && effectiveConfiguration == nil {
+	if bucket == nil && effectiveAccount == nil && effectiveConfiguration == nil {
 		return nil
 	}
 	return &s3fern.S3PublicAccessBlock{
-		Bucket:    bucket,
-		Account:   account,
-		Effective: effectiveConfiguration,
+		Bucket:           bucket,
+		EffectiveAccount: effectiveAccount,
+		Effective:        effectiveConfiguration,
 	}
 }
 
