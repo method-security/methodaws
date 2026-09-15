@@ -61,6 +61,20 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: boolPointer(true),
 		},
 		{
+			name: "policy variable resource is not guessed",
+			policy: `{
+				"Version": "2012-10-17",
+				"Statement": [{
+					"Effect": "Allow",
+					"Principal": "*",
+					"Action": ["s3:GetObject", "s3:PutObject"],
+					"Resource": "arn:aws:s3:::example-bucket/${aws:username}/*"
+				}]
+			}`,
+			publicRead:  nil,
+			publicWrite: nil,
+		},
+		{
 			name: "deny on the same object prefix overrides public access",
 			policy: `{
 				"Statement": [

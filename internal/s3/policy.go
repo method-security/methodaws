@@ -277,6 +277,9 @@ func policyOperationResources(
 }
 
 func objectResourceProbe(resourcePattern, bucketARN string) (string, bool) {
+	if strings.Contains(resourcePattern, "${") {
+		return "", false
+	}
 	separator := strings.Index(resourcePattern, "/")
 	if separator < 0 || !wildcardMatch(resourcePattern[:separator], bucketARN, false) {
 		return "", false
@@ -393,10 +396,18 @@ func valuesMatch(values, excludedValues []string, candidate string, caseInsensit
 	if len(excludedValues) > 0 || len(values) == 0 {
 		return matchUnknown
 	}
+	unknown := false
 	for _, value := range values {
+		if strings.Contains(value, "${") {
+			unknown = true
+			continue
+		}
 		if wildcardMatch(value, candidate, caseInsensitive) {
 			return matchYes
 		}
+	}
+	if unknown {
+		return matchUnknown
 	}
 	return matchNo
 }
