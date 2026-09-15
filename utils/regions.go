@@ -42,12 +42,35 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 	queryConfig.Region = queryRegion
 	regions, err := enabledAWSRegions(ctx, ec2.NewFromConfig(queryConfig), normalizedSelectedRegions)
 	if err != nil {
-		log.Error("Failed to discover enabled AWS regions", svc1log.SafeParam("region", queryRegion), svc1log.Stacktrace(err))
-		return nil, err
+		fallbackRegions, fallbackErr := regionDiscoveryFallback(cfg.Region, normalizedSelectedRegions, err)
+		if fallbackErr != nil {
+			log.Error("Failed to discover enabled AWS regions", svc1log.SafeParam("region", queryRegion), svc1log.Stacktrace(err))
+			return nil, fallbackErr
+		}
+		log.Warn(
+			"Unable to validate enabled AWS regions; using configured regions",
+			svc1log.SafeParam("regions", fallbackRegions),
+			svc1log.Stacktrace(err),
+		)
+		return fallbackRegions, nil
 	}
 
 	log.Info("Discovered enabled AWS regions", svc1log.SafeParam("regions", regions))
 	return regions, nil
+}
+
+func regionDiscoveryFallback(configRegion string, selectedRegions []string, discoveryErr error) ([]string, error) {
+	if len(selectedRegions) > 0 {
+		return selectedRegions, nil
+	}
+	if configRegion != "" {
+		regions, err := normalizeSelectedRegions([]string{configRegion})
+		if err != nil {
+			return nil, fmt.Errorf("describe enabled AWS regions: %w; configured region is invalid: %v", discoveryErr, err)
+		}
+		return regions, nil
+	}
+	return nil, discoveryErr
 }
 
 func regionDiscoveryQueryRegion(configRegion string, selectedRegions []string) (string, error) {

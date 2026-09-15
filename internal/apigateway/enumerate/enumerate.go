@@ -2,13 +2,17 @@ package apigateway
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
+
+const lambdaInvocationResourceMarker = "functions/"
 
 // EnumerateAPIGateway enumerates API Gateways based on the provided configuration
 func EnumerateAPIGateway(ctx context.Context, awsConfig aws.Config, config apigatewayfern.ApiGatewayEnumerateConfig) *apigatewayfern.ApiGatewayEnumerateReport {
@@ -142,6 +146,38 @@ func extractResourceNameFromArn(arn string) *string {
 	}
 
 	return nil
+}
+
+func lambdaFunctionFromIntegrationURI(integrationURI string) (string, *string, error) {
+	parsedURI, err := awsarn.Parse(integrationURI)
+	if err != nil {
+		return "", nil, fmt.Errorf("parse Lambda integration URI: %w", err)
+	}
+
+	functionARN := integrationURI
+	if parsedURI.Service == "apigateway" {
+		markerIndex := strings.Index(parsedURI.Resource, lambdaInvocationResourceMarker)
+		if markerIndex < 0 {
+			return "", nil, fmt.Errorf("API Gateway Lambda integration URI is missing a function ARN")
+		}
+		functionARN = parsedURI.Resource[markerIndex+len(lambdaInvocationResourceMarker):]
+		var found bool
+		functionARN, found = strings.CutSuffix(functionARN, "/invocations")
+		if !found {
+			return "", nil, fmt.Errorf("API Gateway Lambda integration URI is missing the invocations suffix")
+		}
+	}
+
+	parsedFunctionARN, err := awsarn.Parse(functionARN)
+	if err != nil || parsedFunctionARN.Service != "lambda" {
+		return "", nil, fmt.Errorf("API Gateway integration does not contain a valid Lambda ARN")
+	}
+	resourceParts := strings.Split(parsedFunctionARN.Resource, ":")
+	if len(resourceParts) < 2 || resourceParts[0] != "function" || resourceParts[1] == "" {
+		return "", nil, fmt.Errorf("API Gateway integration does not contain a Lambda function ARN")
+	}
+	functionName := resourceParts[1]
+	return functionARN, &functionName, nil
 }
 
 // analyzeAPISecurity performs security analysis on API Gateway configurations

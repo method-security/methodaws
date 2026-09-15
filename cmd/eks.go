@@ -16,7 +16,7 @@ func (a *MethodAws) InitEksCommand() {
 		Long:  `Enumerate EKS instances`,
 	}
 
-	enumerateCmd := &cobra.Command{
+	enumerateCmd := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate EKS instances",
 		Long:  `Enumerate EKS instances`,
@@ -32,9 +32,9 @@ func (a *MethodAws) InitEksCommand() {
 
 			// Get Report
 			report := eks.EnumerateEks(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	credsCmd := &cobra.Command{
 		Use:   "creds",
@@ -52,7 +52,7 @@ func (a *MethodAws) InitEksCommand() {
 				a.OutputSignal.AddError(err)
 				return
 			}
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
 	}
 

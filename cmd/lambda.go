@@ -14,7 +14,7 @@ func (a *MethodAws) InitLambdaCommand() {
 		Long:  `Audit Lambda functions`,
 	}
 
-	enumerateCmd := &cobra.Command{
+	enumerateCmd := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate Lambda functions",
 		Long:  `Enumerate Lambda functions`,
@@ -30,9 +30,9 @@ func (a *MethodAws) InitLambdaCommand() {
 
 			// Get Report
 			report := lambda.EnumerateLambda(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	lambdaCmd.AddCommand(enumerateCmd)
 	a.RootCmd.AddCommand(lambdaCmd)

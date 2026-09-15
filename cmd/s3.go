@@ -48,7 +48,7 @@ func (a *MethodAws) InitS3Command() {
 
 			// Get Report
 			report := s3.EnumerateS3(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
 	}
 	s3Cmd.AddCommand(enumerateCmd)
@@ -100,7 +100,7 @@ func (a *MethodAws) InitS3Command() {
 
 			// Get Report
 			report := external.EnumerateS3(cmd.Context(), config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
 	}
 
@@ -137,7 +137,7 @@ func (a *MethodAws) InitS3Command() {
 
 			// Return report
 			report := s3.ListS3Bucket(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
 	}
 

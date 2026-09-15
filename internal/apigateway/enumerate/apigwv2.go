@@ -406,10 +406,13 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 		}}, nil
 
 	case types.IntegrationTypeAwsProxy:
-		arn := aws.ToString(integration.IntegrationUri)
+		functionARN, functionName, err := lambdaFunctionFromIntegrationURI(aws.ToString(integration.IntegrationUri))
+		if err != nil {
+			return nil, err
+		}
 		backend := &apigatewayfern.LambdaBackend{
-			Arn:          arn,
-			FunctionName: extractResourceNameFromArn(arn),
+			Arn:          functionARN,
+			FunctionName: functionName,
 			Region:       region,
 		}
 

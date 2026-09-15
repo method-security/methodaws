@@ -94,3 +94,28 @@ func TestConvertV1VpcLinkRejectsEmptyCachedTargetsWithoutPanicking(t *testing.T)
 	require.NotNil(t, converted)
 	assert.Equal(t, "vpclink-123", converted.VpcLink.Backend.LoadBalancer.VpcLinkId)
 }
+
+func TestConvertV1LambdaIntegrationExtractsFunctionARN(t *testing.T) {
+	t.Parallel()
+
+	integration := &types.Integration{
+		Type: types.IntegrationTypeAwsProxy,
+		Uri: aws.String(
+			"arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/" +
+				"arn:aws:lambda:us-east-1:123456789012:function:test-function/invocations",
+		),
+	}
+
+	converted, err := convertV1Integration(
+		context.Background(),
+		&stubVpcLinkClient{},
+		make(map[string][]string),
+		integration,
+		"us-east-1",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, converted.AwsProxy)
+	assert.Equal(t, "arn:aws:lambda:us-east-1:123456789012:function:test-function", converted.AwsProxy.Backend.Arn)
+	assert.Equal(t, "test-function", aws.ToString(converted.AwsProxy.Backend.FunctionName))
+}

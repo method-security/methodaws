@@ -39,7 +39,7 @@ func (a *MethodAws) InitCloudFrontCommand() {
 
 			// Report
 			report := enumerate.GatherCloudFrontInfo(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
 	}
 

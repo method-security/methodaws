@@ -22,7 +22,7 @@ func (a *MethodAws) InitWAFCommand() {
 	}
 
 	// Enumerate command
-	enumerateWAF := &cobra.Command{
+	enumerateWAF := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate WAFs",
 		Long:  `Enumerate WAFs in your AWS account.`,
@@ -39,9 +39,9 @@ func (a *MethodAws) InitWAFCommand() {
 
 			// Report
 			report := waf.EnumerateWAF(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	wafCmd.AddCommand(enumerateWAF)
 	a.RootCmd.AddCommand(wafCmd)

@@ -39,7 +39,7 @@ func (a *MethodAws) InitRoute53Command() {
 
 			// Get Report
 			report := route53.EnumerateRoute53(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
 	}
 

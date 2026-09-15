@@ -415,10 +415,14 @@ func convertV1Integration(
 		if methodIntegration.Uri == nil {
 			return nil, fmt.Errorf("AWS Proxy integration missing ARN")
 		}
+		functionARN, functionName, err := lambdaFunctionFromIntegrationURI(*methodIntegration.Uri)
+		if err != nil {
+			return nil, err
+		}
 
 		backend := &apigatewayfern.LambdaBackend{
-			Arn:          *methodIntegration.Uri,
-			FunctionName: extractResourceNameFromArn(*methodIntegration.Uri),
+			Arn:          functionARN,
+			FunctionName: functionName,
 			Region:       region,
 		}
 

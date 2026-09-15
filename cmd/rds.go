@@ -19,7 +19,7 @@ func (a *MethodAws) InitRdsCommand() {
 		Long:  `Audit and manage RDS instances`,
 	}
 
-	enumerateCmd := &cobra.Command{
+	enumerateCmd := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate RDS instances",
 		Long:  `Enumerate RDS instances in your AWS account.`,
@@ -36,9 +36,9 @@ func (a *MethodAws) InitRdsCommand() {
 
 			// Report
 			report := rds.EnumerateRDS(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	rdsCmd.AddCommand(enumerateCmd)
 	a.RootCmd.AddCommand(rdsCmd)

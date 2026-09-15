@@ -88,3 +88,20 @@ func TestEnabledAWSRegionsHandlesMissingResponseAndErrors(t *testing.T) {
 	_, err = enabledAWSRegions(context.Background(), stubDescribeRegionsClient{err: errors.New("denied")}, nil)
 	require.EqualError(t, err, "describe enabled AWS regions: denied")
 }
+
+func TestRegionDiscoveryFallback(t *testing.T) {
+	t.Parallel()
+
+	discoveryErr := errors.New("ec2:DescribeRegions denied")
+
+	regions, err := regionDiscoveryFallback("", []string{"us-east-1", "us-west-2"}, discoveryErr)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"us-east-1", "us-west-2"}, regions)
+
+	regions, err = regionDiscoveryFallback("us-gov-west-1", nil, discoveryErr)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"us-gov-west-1"}, regions)
+
+	_, err = regionDiscoveryFallback("", nil, discoveryErr)
+	require.ErrorIs(t, err, discoveryErr)
+}

@@ -22,7 +22,7 @@ func (a *MethodAws) InitLoadBalancerCommand() {
 	}
 
 	// Enumerate Command
-	enumerate := &cobra.Command{
+	enumerate := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate load balancers",
 		Long:  `Enumerate load balancers in your AWS account.`,
@@ -62,9 +62,9 @@ func (a *MethodAws) InitLoadBalancerCommand() {
 
 			// Report
 			report := loadbalancer.EnumerateLoadBalancers(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	enumerate.Flags().StringSlice("versions", []string{"V1", "V2"}, "Load balancer versions to enumerate. Valid options are ['V1', 'V2']. Default value is ['V1', 'V2']")
 

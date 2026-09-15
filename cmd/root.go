@@ -37,6 +37,20 @@ type MethodAws struct {
 	outputWritten bool
 }
 
+const discoverRegionsAnnotation = "methodaws/discover-regions"
+
+func regionalCommand(command *cobra.Command) *cobra.Command {
+	if command.Annotations == nil {
+		command.Annotations = make(map[string]string)
+	}
+	command.Annotations[discoverRegionsAnnotation] = "true"
+	return command
+}
+
+func commandRequiresRegionDiscovery(command *cobra.Command) bool {
+	return command.Annotations[discoverRegionsAnnotation] == "true"
+}
+
 // NewMethodAws returns a new MethodAws struct with the provided version string. The MethodAws struct is used to
 // initialize the root command and all subcommands that are used throughout execution of the CLI.
 // We pass the version command in here from the main.go file, where we set the version string during the build process.
@@ -92,9 +106,11 @@ func (a *MethodAws) setupCommonConfig(cmd *cobra.Command, outputFormat string, o
 			return err
 		}
 		a.AwsConfig = &awsConfig
-		a.RootFlags.Regions, err = utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
-		if err != nil {
-			return fmt.Errorf("unable to discover enabled AWS regions: %w", err)
+		if commandRequiresRegionDiscovery(cmd) {
+			a.RootFlags.Regions, err = utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
+			if err != nil {
+				return fmt.Errorf("unable to discover enabled AWS regions: %w", err)
+			}
 		}
 	}
 
@@ -181,11 +197,8 @@ func (a *MethodAws) writeOutput() error {
 	)
 }
 
-func (a *MethodAws) setReport(report any, reportErrors []string) {
+func (a *MethodAws) setReport(report any) {
 	a.OutputSignal.Content = report
-	if len(reportErrors) > 0 {
-		a.OutputSignal.AddError(errors.New(strings.Join(reportErrors, "; ")))
-	}
 }
 
 // A utility function to validate that the provided output format is one of the supported formats: json, yaml, signal.

@@ -23,7 +23,7 @@ func (a *MethodAws) InitVPCCommand() {
 		Long:  `Audit and manage VPC services`,
 	}
 
-	enumerateCmd := &cobra.Command{
+	enumerateCmd := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate all VPCs",
 		Long:  `Enumerate all VPCs in your AWS account.`,
@@ -40,9 +40,9 @@ func (a *MethodAws) InitVPCCommand() {
 
 			// Genate Report
 			report := vpc.EnumerateVPC(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	vpcCmd.AddCommand(enumerateCmd)
 	a.RootCmd.AddCommand(vpcCmd)

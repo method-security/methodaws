@@ -23,7 +23,7 @@ func (a *MethodAws) InitEc2Command() {
 	}
 
 	// Enumerate command
-	enumerateCmd := &cobra.Command{
+	enumerateCmd := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate EC2 instances",
 		Long:  `Enumerate EC2 instances`,
@@ -40,9 +40,9 @@ func (a *MethodAws) InitEc2Command() {
 
 			// Genate Report
 			report := enumerate.InternalEnumerateEc2(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	// Add subcommands
 	ec2Cmd.AddCommand(enumerateCmd)

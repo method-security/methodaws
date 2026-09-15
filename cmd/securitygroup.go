@@ -25,7 +25,7 @@ func (a *MethodAws) InitSecurityGroupCommand() {
 	}
 
 	// Enumerate Command
-	enumerateCmd := &cobra.Command{
+	enumerateCmd := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate security groups",
 		Long:  `Enumerate security groups`,
@@ -42,9 +42,9 @@ func (a *MethodAws) InitSecurityGroupCommand() {
 
 			// Get Report
 			report := securitygroup.EnumerateSecurityGroups(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	securityGroupCmd.AddCommand(enumerateCmd)
 	a.RootCmd.AddCommand(securityGroupCmd)

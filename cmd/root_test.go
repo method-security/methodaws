@@ -12,17 +12,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSetReportPreservesContentAndSetsFailureStatus(t *testing.T) {
+func TestSetReportPreservesPartialContentWithoutFailingSignal(t *testing.T) {
 	t.Parallel()
 
 	app := NewMethodAws("test")
-	report := struct{ Value string }{Value: "partial"}
-	app.setReport(report, []string{"first failure", "second failure"})
+	report := struct {
+		Value  string
+		Errors []string
+	}{Value: "partial", Errors: []string{"enrichment denied"}}
+	app.setReport(report)
 
 	assert.Equal(t, report, app.OutputSignal.Content)
-	assert.Equal(t, 1, app.OutputSignal.Status)
-	require.NotNil(t, app.OutputSignal.ErrorMessage)
-	assert.Equal(t, "first failure; second failure", *app.OutputSignal.ErrorMessage)
+	assert.Equal(t, 0, app.OutputSignal.Status)
+	assert.Nil(t, app.OutputSignal.ErrorMessage)
+}
+
+func TestRegionalCommandRequiresRegionDiscovery(t *testing.T) {
+	t.Parallel()
+
+	regional := regionalCommand(&cobra.Command{Use: "regional"})
+	global := &cobra.Command{Use: "global"}
+
+	assert.True(t, commandRequiresRegionDiscovery(regional))
+	assert.False(t, commandRequiresRegionDiscovery(global))
 }
 
 func TestExecuteWritesStartupFailure(t *testing.T) {

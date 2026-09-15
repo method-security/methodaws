@@ -15,7 +15,7 @@ func (a *MethodAws) InitAPIGatewayCommand() {
 		Aliases: []string{"agw"},
 	}
 
-	enumerateCmd := &cobra.Command{
+	enumerateCmd := regionalCommand(&cobra.Command{
 		Use:   "enumerate",
 		Short: "Enumerate api gateways",
 		Long:  `Enumerate api gateways in your AWS account.`,
@@ -31,9 +31,9 @@ func (a *MethodAws) InitAPIGatewayCommand() {
 
 			// Get Report
 			report := apigateway.EnumerateAPIGateway(cmd.Context(), *a.AwsConfig, config)
-			a.setReport(report, report.Errors)
+			a.setReport(report)
 		},
-	}
+	})
 
 	apiGatewayCmd.AddCommand(enumerateCmd)
 	a.RootCmd.AddCommand(apiGatewayCmd)
