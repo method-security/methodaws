@@ -32,10 +32,10 @@ types:
   RuleIdentificationInfo:
     properties:
       id: string
+      arn: optional<string>
   RuleConfigurationInfo:
     properties:
       direction: PermissionDirection
-      peer: RulePeerInfo
       fromPort: optional<integer>
       toPort: optional<integer>
       ipProtocol: optional<string>
@@ -48,6 +48,16 @@ types:
       identification: RuleIdentificationInfo
       configuration: RuleConfigurationInfo
       resources: optional<RuleResourceInfo>
+  RdsEc2SecurityGroupAuthorization:
+    properties:
+      securityGroup: optional<ReferencedSecurityGroup>
+      groupName: optional<string>
+      ownerId: optional<string>
+      status: optional<string>
+  RdsIpRangeAuthorization:
+    properties:
+      cidr: string
+      status: optional<string>
 # Security Group High level structs
   SecurityGroupIdentificationInfo:
     properties:
@@ -65,6 +75,8 @@ types:
     properties:
       vpc: optional<common.VpcReference>
       rules: optional<list<RuleDetails>>
+      rdsEc2SecurityGroupAuthorizations: optional<list<RdsEc2SecurityGroupAuthorization>>
+      rdsIpRangeAuthorizations: optional<list<RdsIpRangeAuthorization>>
       ec2Instances: optional<list<common.Ec2InstanceReference>>
       rdsInstances: optional<list<common.RdsInstanceReference>>
       loadBalancers: optional<list<common.LoadBalancerReference>>
