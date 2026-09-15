@@ -36,7 +36,7 @@ func (a *MethodAws) InitRdsCommand() {
 
 			// Report
 			report := rds.EnumerateRDS(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

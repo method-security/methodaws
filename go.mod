@@ -4,7 +4,6 @@ go 1.26.5
 
 require (
 	github.com/Method-Security/pkg v0.1.1
-	github.com/aws/aws-sdk-go v1.55.8
 	github.com/aws/aws-sdk-go-v2 v1.43.6
 	github.com/aws/aws-sdk-go-v2/config v1.32.37
 	github.com/aws/aws-sdk-go-v2/service/apigatewayv2 v1.37.6

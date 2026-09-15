@@ -40,7 +40,7 @@ func (a *MethodAws) InitVPCCommand() {
 
 			// Genate Report
 			report := vpc.EnumerateVPC(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

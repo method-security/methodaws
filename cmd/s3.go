@@ -48,7 +48,7 @@ func (a *MethodAws) InitS3Command() {
 
 			// Get Report
 			report := s3.EnumerateS3(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 	s3Cmd.AddCommand(enumerateCmd)
@@ -95,31 +95,17 @@ func (a *MethodAws) InitS3Command() {
 				return
 			}
 
-			// Check if specific region was provided via --region flag
-			// Overide since this is an external command and we dont want to default check all regions
-			regionFlag, err := cmd.Flags().GetString("region")
-			if err != nil {
-				a.OutputSignal.AddError(err)
-				return
-			}
-			var regions []string
-			if regionFlag != "" {
-				// Use specific region if provided
-				regions = []string{regionFlag}
-			}
-
 			// Get Config
-			config := getExternalS3BucketConfig(regions, bucketURL, targetSeed, maxCandidates)
+			config := getExternalS3BucketConfig(a.RootFlags.Regions, bucketURL, targetSeed, maxCandidates)
 
 			// Get Report
 			report := external.EnumerateS3(cmd.Context(), config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 
 	// Flags
 	externalCmd.Flags().String("url", "", "URL of a single S3 bucket to enumerate")
-	externalCmd.Flags().String("region", "", "Region of the S3 bucket")
 	externalCmd.Flags().String("target-seed", "", "Org/domain seed used to generate and probe candidate bucket names")
 	externalCmd.Flags().Int("max-candidates", 50, "Max candidate bucket names to probe when --target-seed is set (cap 500)")
 
@@ -151,7 +137,7 @@ func (a *MethodAws) InitS3Command() {
 
 			// Return report
 			report := s3.ListS3Bucket(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

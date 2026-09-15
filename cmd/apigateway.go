@@ -31,7 +31,7 @@ func (a *MethodAws) InitAPIGatewayCommand() {
 
 			// Get Report
 			report := apigateway.EnumerateAPIGateway(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

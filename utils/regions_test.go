@@ -3,7 +3,6 @@ package utils
 import (
 	"context"
 	"errors"
-	"sort"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -88,20 +87,4 @@ func TestEnabledAWSRegionsHandlesMissingResponseAndErrors(t *testing.T) {
 
 	_, err = enabledAWSRegions(context.Background(), stubDescribeRegionsClient{err: errors.New("denied")}, nil)
 	require.EqualError(t, err, "describe enabled AWS regions: denied")
-}
-
-func TestGeneralRegionsAreSortedAndDeduplicated(t *testing.T) {
-	regions := GetGeneralRegionsList()
-
-	require.NotEmpty(t, regions)
-	assert.True(t, sort.StringsAreSorted(regions))
-	assert.Equal(t, len(regions), len(uniqueStrings(regions)))
-}
-
-func uniqueStrings(values []string) map[string]struct{} {
-	result := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		result[value] = struct{}{}
-	}
-	return result
 }

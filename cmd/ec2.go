@@ -40,7 +40,7 @@ func (a *MethodAws) InitEc2Command() {
 
 			// Genate Report
 			report := enumerate.InternalEnumerateEc2(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

@@ -39,7 +39,7 @@ func (a *MethodAws) InitWAFCommand() {
 
 			// Report
 			report := waf.EnumerateWAF(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

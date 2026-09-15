@@ -30,7 +30,7 @@ func (a *MethodAws) InitLambdaCommand() {
 
 			// Get Report
 			report := lambda.EnumerateLambda(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

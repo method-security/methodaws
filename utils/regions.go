@@ -11,7 +11,6 @@ import (
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/palantir/witchcraft-go-logging/wlog"
 
 	// Import wlog-zap for its side effects, initializing the zap logger
@@ -151,42 +150,4 @@ func sortedRegionNames(regions map[string]struct{}) []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-func GetRegionsToCheck(ctx context.Context, selectedRegions []string) []string {
-	log := svc1log.FromContext(ctx)
-	if len(selectedRegions) > 0 {
-		log.Info(fmt.Sprintf("Using selected regions: %v", selectedRegions))
-		return selectedRegions
-	}
-
-	log.Info("No regions selected, checking all regions")
-	allRegions := make(map[string]struct{})
-	resolver := endpoints.DefaultResolver()
-	partitions := resolver.(endpoints.EnumPartitions).Partitions()
-
-	for _, p := range partitions {
-		for region := range p.Regions() {
-			allRegions[region] = struct{}{}
-		}
-	}
-	regions := sortedRegionNames(allRegions)
-	log.Info(fmt.Sprintf("All regions to check: %v", regions))
-	return regions
-}
-
-// GetGeneralRegionsList returns a list of known AWS regions.
-func GetGeneralRegionsList() []string {
-	resolver := endpoints.DefaultResolver()
-	for _, partition := range resolver.(endpoints.EnumPartitions).Partitions() {
-		if partition.ID() != endpoints.AwsPartitionID {
-			continue
-		}
-		regions := make(map[string]struct{}, len(partition.Regions()))
-		for region := range partition.Regions() {
-			regions[region] = struct{}{}
-		}
-		return sortedRegionNames(regions)
-	}
-	return nil
 }

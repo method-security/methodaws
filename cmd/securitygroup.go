@@ -42,7 +42,7 @@ func (a *MethodAws) InitSecurityGroupCommand() {
 
 			// Get Report
 			report := securitygroup.EnumerateSecurityGroups(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

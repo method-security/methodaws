@@ -32,7 +32,7 @@ func (a *MethodAws) InitEksCommand() {
 
 			// Get Report
 			report := eks.EnumerateEks(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 
@@ -52,7 +52,7 @@ func (a *MethodAws) InitEksCommand() {
 				a.OutputSignal.AddError(err)
 				return
 			}
-			a.OutputSignal.Content = report
+			a.setReport(report, report.Errors)
 		},
 	}
 

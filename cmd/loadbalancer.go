@@ -61,7 +61,8 @@ func (a *MethodAws) InitLoadBalancerCommand() {
 			config := getLoadBalancerEnumerateConfig(a.RootFlags.Regions, accountID, versions)
 
 			// Report
-			a.OutputSignal.Content = loadbalancer.EnumerateLoadBalancers(cmd.Context(), *a.AwsConfig, config)
+			report := loadbalancer.EnumerateLoadBalancers(cmd.Context(), *a.AwsConfig, config)
+			a.setReport(report, report.Errors)
 		},
 	}
 

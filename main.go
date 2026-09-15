@@ -30,9 +30,5 @@ func main() {
 	methodaws.InitWAFCommand()
 	methodaws.InitCloudFrontCommand()
 
-	if err := methodaws.RootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
-
-	os.Exit(0)
+	os.Exit(methodaws.Execute())
 }
