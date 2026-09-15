@@ -22,6 +22,7 @@ func TestConvertEC2SecurityGroupRuleIncludesPrefixListPeer(t *testing.T) {
 
 	rule, err := convertAWSEC2SecurityGroupRuleToFern(types.SecurityGroupRule{
 		SecurityGroupRuleId: aws.String("sgr-0123456789abcdef0"),
+		IsEgress:            aws.Bool(false),
 		PrefixListId:        aws.String("pl-0123456789abcdef0"),
 		IpProtocol:          aws.String("tcp"),
 		FromPort:            aws.Int32(443),
@@ -30,7 +31,7 @@ func TestConvertEC2SecurityGroupRuleIncludesPrefixListPeer(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, rule)
-	assert.Equal(t, "pl-0123456789abcdef0", aws.ToString(rule.Configuration.Peer.PrefixListId))
+	assert.Equal(t, "pl-0123456789abcdef0", aws.ToString(rule.Resources.Peer.PrefixListId))
 }
 
 func TestConvertEC2SecurityGroupRuleKeepsMissingReferencedGroupOwnerUnset(t *testing.T) {
@@ -38,9 +39,10 @@ func TestConvertEC2SecurityGroupRuleKeepsMissingReferencedGroupOwnerUnset(t *tes
 
 	rule, err := convertAWSEC2SecurityGroupRuleToFern(types.SecurityGroupRule{
 		SecurityGroupRuleId: aws.String("sgr-0123456789abcdef0"),
+		IsEgress:            aws.Bool(false),
 		ReferencedGroupInfo: &types.ReferencedSecurityGroup{GroupId: aws.String("sg-0123456789abcdef0")},
 	})
 
 	require.NoError(t, err)
-	assert.Nil(t, rule.Configuration.Peer.ReferencedSecurityGroup.UserId)
+	assert.Nil(t, rule.Resources.Peer.ReferencedSecurityGroup.UserId)
 }
