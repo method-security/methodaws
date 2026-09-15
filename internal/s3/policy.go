@@ -20,6 +20,7 @@ type policyPermissions struct {
 }
 
 type policyDocument struct {
+	Version    string           `json:"Version"`
 	Statements policyStatements `json:"Statement"`
 }
 
@@ -69,8 +70,9 @@ type policyStatement struct {
 }
 
 type policyOperation struct {
-	action   string
-	resource string
+	action                 string
+	resource               string
+	allowedResourcePattern string
 }
 
 var publicReadOperations = []func(string) policyOperation{
@@ -129,6 +131,7 @@ func analyzeBucketPolicy(policyJSON, bucketARN string) (policyPermissions, error
 	if len(document.Statements) == 0 {
 		return policyPermissions{}, fmt.Errorf("parse S3 bucket policy: Statement cannot be empty")
 	}
+	resolveAnonymousPolicyVariables(document.Statements, document.Version)
 
 	return policyPermissions{
 		publicRead:         evaluatePolicyCapability(document.Statements, bucketARN, publicReadOperations),
@@ -227,9 +230,8 @@ func evaluatePolicyCapability(
 	unknown := false
 	for _, operationForBucket := range operations {
 		operation := operationForBucket(bucketARN)
-		for _, resource := range policyOperationResources(statements, bucketARN, operation) {
-			operation.resource = resource
-			decision := evaluatePolicyOperation(statements, operation)
+		for _, resourceOperation := range policyOperationResources(statements, bucketARN, operation) {
+			decision := evaluatePolicyOperation(statements, resourceOperation)
 			if decision != nil && *decision {
 				return boolPointer(true)
 			}
@@ -248,8 +250,8 @@ func policyOperationResources(
 	statements []policyStatement,
 	bucketARN string,
 	operation policyOperation,
-) []string {
-	resources := []string{operation.resource}
+) []policyOperation {
+	resources := []policyOperation{operation}
 	if !strings.HasPrefix(operation.resource, bucketARN+"/") {
 		return resources
 	}
@@ -270,7 +272,11 @@ func policyOperationResources(
 				continue
 			}
 			seen[resource] = struct{}{}
-			resources = append(resources, resource)
+			resources = append(resources, policyOperation{
+				action:                 operation.action,
+				resource:               resource,
+				allowedResourcePattern: resourcePattern,
+			})
 		}
 	}
 	return resources
@@ -327,6 +333,11 @@ func evaluatePolicyOperation(statements []policyStatement, operation policyOpera
 				unknownAllow = true
 			}
 		case strings.EqualFold(statement.Effect, "Deny"):
+			if operation.allowedResourcePattern != "" &&
+				!denyCoversAllowedResource(statement, operation.allowedResourcePattern) {
+				unknownDeny = true
+				continue
+			}
 			switch classifyDenyCondition(statement.Condition) {
 			case denyBlocksPublic:
 				return boolPointer(false)
@@ -345,6 +356,40 @@ func evaluatePolicyOperation(statements []policyStatement, operation policyOpera
 		return nil
 	}
 	return boolPointer(false)
+}
+
+func denyCoversAllowedResource(statement policyStatement, allowedResourcePattern string) bool {
+	if len(statement.NotResource) > 0 {
+		return false
+	}
+	for _, deniedResourcePattern := range statement.Resource {
+		if deniedResourcePattern == "*" || deniedResourcePattern == allowedResourcePattern {
+			return true
+		}
+	}
+	return false
+}
+
+var anonymousUserIDVariable = regexp.MustCompile(`(?i)\$\{aws:userid\}`)
+
+func resolveAnonymousPolicyVariables(statements []policyStatement, version string) {
+	if version != "2012-10-17" {
+		return
+	}
+	for index := range statements {
+		for resourceIndex := range statements[index].Resource {
+			statements[index].Resource[resourceIndex] = anonymousUserIDVariable.ReplaceAllString(
+				statements[index].Resource[resourceIndex],
+				"anonymous",
+			)
+		}
+		for resourceIndex := range statements[index].NotResource {
+			statements[index].NotResource[resourceIndex] = anonymousUserIDVariable.ReplaceAllString(
+				statements[index].NotResource[resourceIndex],
+				"anonymous",
+			)
+		}
+	}
 }
 
 type matchResult uint8
@@ -528,13 +573,13 @@ func classifySourceIPCondition(operator string, rawValues json.RawMessage) condi
 	if err != nil || len(values) == 0 {
 		return conditionUnknown
 	}
-	if strings.EqualFold(operator, "NotIpAddress") {
-		return conditionPublic
-	}
-	if !strings.EqualFold(operator, "IpAddress") {
+	normalizedOperator := strings.ToLower(operator)
+	normalizedOperator = strings.TrimSuffix(normalizedOperator, "ifexists")
+	if normalizedOperator != "ipaddress" && normalizedOperator != "notipaddress" {
 		return conditionUnknown
 	}
 
+	prefixes := make([]netip.Prefix, 0, len(values))
 	for _, value := range values {
 		prefix, err := netip.ParsePrefix(value)
 		if err != nil {
@@ -544,11 +589,84 @@ func classifySourceIPCondition(operator string, rawValues json.RawMessage) condi
 			}
 			prefix = netip.PrefixFrom(address, address.BitLen())
 		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+
+	if normalizedOperator == "notipaddress" {
+		if prefixesCoverAddressFamily(prefixes, true) && prefixesCoverAddressFamily(prefixes, false) {
+			return conditionRestricted
+		}
+		return conditionPublic
+	}
+
+	for _, prefix := range prefixes {
 		if (prefix.Addr().Is4() && prefix.Bits() < 8) || (prefix.Addr().Is6() && prefix.Bits() < 32) {
 			return conditionPublic
 		}
 	}
 	return conditionRestricted
+}
+
+type prefixCoverageNode struct {
+	covered  bool
+	children [2]*prefixCoverageNode
+}
+
+func prefixesCoverAddressFamily(prefixes []netip.Prefix, ipv4 bool) bool {
+	root := &prefixCoverageNode{}
+	bitLength := 128
+	if ipv4 {
+		bitLength = 32
+	}
+	for _, prefix := range prefixes {
+		if prefix.Addr().Is4() != ipv4 {
+			continue
+		}
+		insertCoveredPrefix(root, prefix.Addr(), prefix.Bits(), bitLength)
+	}
+	return root.covered
+}
+
+func insertCoveredPrefix(node *prefixCoverageNode, address netip.Addr, prefixBits, bitLength int) {
+	current := node
+	for bitIndex := 0; bitIndex < prefixBits; bitIndex++ {
+		if current.covered {
+			return
+		}
+		bit := addressBit(address, bitIndex)
+		if current.children[bit] == nil {
+			current.children[bit] = &prefixCoverageNode{}
+		}
+		current = current.children[bit]
+	}
+	current.covered = true
+	current.children = [2]*prefixCoverageNode{}
+	collapseCoveredPrefixes(node, bitLength)
+}
+
+func addressBit(address netip.Addr, bitIndex int) int {
+	bytes := address.As16()
+	if address.Is4() {
+		ipv4 := address.As4()
+		return int((ipv4[bitIndex/8] >> (7 - bitIndex%8)) & 1)
+	}
+	return int((bytes[bitIndex/8] >> (7 - bitIndex%8)) & 1)
+}
+
+func collapseCoveredPrefixes(node *prefixCoverageNode, remainingBits int) bool {
+	if node == nil || node.covered {
+		return node != nil && node.covered
+	}
+	if remainingBits == 0 {
+		return false
+	}
+	leftCovered := collapseCoveredPrefixes(node.children[0], remainingBits-1)
+	rightCovered := collapseCoveredPrefixes(node.children[1], remainingBits-1)
+	if leftCovered && rightCovered {
+		node.covered = true
+		node.children = [2]*prefixCoverageNode{}
+	}
+	return node.covered
 }
 
 func isPositiveConditionOperator(operator string) bool {

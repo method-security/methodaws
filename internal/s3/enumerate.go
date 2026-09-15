@@ -287,7 +287,7 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	client := s3.NewFromConfig(awscfg)
 
 	log.Info("Listing S3 buckets", svc1log.SafeParam("accountId", aws.ToString(&config.AccountId)))
-	listBucketsOutput, err := client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	listBucketsOutput, err := listBuckets(ctx, client)
 	if err != nil {
 		log.Error("Failed to list S3 buckets", svc1log.Stacktrace(err))
 		errors = append(errors, err.Error())
@@ -362,10 +362,16 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			continue
 		}
 		s3Bucket.Identification.Arn = bucketARN
+		dnsSuffix, err := methodawsutils.AWSDNSSuffixForRegion(region)
+		if err != nil {
+			errorMessages = append(errorMessages, err.Error())
+			continue
+		}
 		s3Bucket.Identification.Url = fmt.Sprintf(
-			"https://%s.s3.%s.amazonaws.com",
+			"https://%s.s3.%s.%s",
 			s3Bucket.Identification.Name,
 			s3Bucket.Identification.Region,
+			dnsSuffix,
 		)
 
 		// Group buckets by region
@@ -433,6 +439,38 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 	}
 	report.Errors = append(errors, errorMessages...)
 	return report
+}
+
+type listBucketsAPI interface {
+	ListBuckets(context.Context, *s3.ListBucketsInput, ...func(*s3.Options)) (*s3.ListBucketsOutput, error)
+}
+
+func listBuckets(ctx context.Context, client listBucketsAPI) (*s3.ListBucketsOutput, error) {
+	result := &s3.ListBucketsOutput{}
+	input := &s3.ListBucketsInput{MaxBuckets: aws.Int32(1000)}
+	seenTokens := make(map[string]struct{})
+
+	for {
+		page, err := client.ListBuckets(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		if page == nil {
+			return nil, fmt.Errorf("ListBuckets returned no response")
+		}
+		result.Buckets = append(result.Buckets, page.Buckets...)
+		if result.Owner == nil {
+			result.Owner = page.Owner
+		}
+		if page.ContinuationToken == nil || *page.ContinuationToken == "" {
+			return result, nil
+		}
+		if _, exists := seenTokens[*page.ContinuationToken]; exists {
+			return nil, fmt.Errorf("ListBuckets returned duplicate continuation token")
+		}
+		seenTokens[*page.ContinuationToken] = struct{}{}
+		input.ContinuationToken = page.ContinuationToken
+	}
 }
 
 func accountPublicAccessBlockRegion(configRegion string, regions []string) string {

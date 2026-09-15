@@ -92,3 +92,28 @@ func IsCommercialAWSRegion(region string) (bool, error) {
 	}
 	return partition == "aws", nil
 }
+
+// AWSDNSSuffixForRegion returns the service endpoint suffix for the partition that owns region.
+func AWSDNSSuffixForRegion(region string) (string, error) {
+	partition, err := awsPartitionForRegion(region)
+	if err != nil {
+		return "", err
+	}
+
+	switch partition {
+	case "aws-cn":
+		return "amazonaws.com.cn", nil
+	case "aws-eusc":
+		return "amazonaws.eu", nil
+	case "aws-iso":
+		return "c2s.ic.gov", nil
+	case "aws-iso-b":
+		return "sc2s.sgov.gov", nil
+	case "aws-iso-e":
+		return "cloud.adc-e.uk", nil
+	case "aws-iso-f":
+		return "csp.hci.ic.gov", nil
+	default:
+		return "amazonaws.com", nil
+	}
+}

@@ -75,6 +75,20 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: nil,
 		},
 		{
+			name: "anonymous user ID policy variable is resolved",
+			policy: `{
+				"Version": "2012-10-17",
+				"Statement": [{
+					"Effect": "Allow",
+					"Principal": "*",
+					"Action": "s3:GetObject",
+					"Resource": "arn:aws:s3:::example-bucket/public/${aws:userid}/*"
+				}]
+			}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
 			name: "policy variable deny for another bucket does not affect public access",
 			policy: `{
 					"Version": "2012-10-17",
@@ -115,6 +129,27 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 				]
 			}`,
 			publicRead:  boolPointer(false),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "deny on probe key does not hide a broader public prefix",
+			policy: `{
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/public/*"
+					},
+					{
+						"Effect": "Deny",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/public/method-public-probe"
+					}
+				]
+			}`,
+			publicRead:  nil,
 			publicWrite: boolPointer(false),
 		},
 		{
@@ -466,7 +501,9 @@ func TestClassifySourceIPCondition(t *testing.T) {
 		{name: "broad IPv4 range", operator: "IpAddress", values: json.RawMessage(`"0.0.0.0/1"`), expected: conditionPublic},
 		{name: "broad IPv6 range", operator: "IpAddress", values: json.RawMessage(`"::/0"`), expected: conditionPublic},
 		{name: "negative match", operator: "NotIpAddress", values: json.RawMessage(`"10.0.0.0/24"`), expected: conditionPublic},
-		{name: "unsupported operator", operator: "IpAddressIfExists", values: json.RawMessage(`"10.0.0.0/24"`), expected: conditionUnknown},
+		{name: "negative match excludes all addresses", operator: "NotIpAddress", values: json.RawMessage(`["0.0.0.0/0", "::/0"]`), expected: conditionRestricted},
+		{name: "negative match combines prefixes", operator: "NotIpAddress", values: json.RawMessage(`["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"]`), expected: conditionRestricted},
+		{name: "IfExists fixed range", operator: "IpAddressIfExists", values: json.RawMessage(`"10.0.0.0/24"`), expected: conditionRestricted},
 		{name: "invalid range", operator: "IpAddress", values: json.RawMessage(`"invalid"`), expected: conditionUnknown},
 	}
 

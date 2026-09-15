@@ -1,12 +1,32 @@
 package s3
 
 import (
+	"context"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type stubListBucketsClient struct {
+	outputs []*s3.ListBucketsOutput
+	inputs  []*s3.ListBucketsInput
+}
+
+func (s *stubListBucketsClient) ListBuckets(
+	_ context.Context,
+	input *s3.ListBucketsInput,
+	_ ...func(*s3.Options),
+) (*s3.ListBucketsOutput, error) {
+	inputCopy := *input
+	s.inputs = append(s.inputs, &inputCopy)
+	output := s.outputs[0]
+	s.outputs = s.outputs[1:]
+	return output, nil
+}
 
 func TestKmsKeyReferenceRequiresKeyARN(t *testing.T) {
 	t.Parallel()
@@ -41,4 +61,27 @@ func TestKmsKeyReferenceRejectsIdentifiersThatAreNotKeyARNs(t *testing.T) {
 	assert.Nil(t, kmsKeyReference("abcd-1234"))
 	assert.Nil(t, kmsKeyReference("alias/example"))
 	assert.Nil(t, kmsKeyReference("arn:aws:kms:us-east-1:123456789012:alias/example"))
+}
+
+func TestListBucketsPaginates(t *testing.T) {
+	t.Parallel()
+
+	client := &stubListBucketsClient{outputs: []*s3.ListBucketsOutput{
+		{
+			Buckets:           []types.Bucket{{Name: aws.String("first")}},
+			ContinuationToken: aws.String("next-page"),
+		},
+		{Buckets: []types.Bucket{{Name: aws.String("second")}}},
+	}}
+
+	output, err := listBuckets(context.Background(), client)
+
+	require.NoError(t, err)
+	require.Len(t, output.Buckets, 2)
+	assert.Equal(t, "first", aws.ToString(output.Buckets[0].Name))
+	assert.Equal(t, "second", aws.ToString(output.Buckets[1].Name))
+	require.Len(t, client.inputs, 2)
+	assert.Equal(t, int32(1000), aws.ToInt32(client.inputs[0].MaxBuckets))
+	assert.Nil(t, client.inputs[0].ContinuationToken)
+	assert.Equal(t, "next-page", aws.ToString(client.inputs[1].ContinuationToken))
 }
