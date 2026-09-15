@@ -437,6 +437,8 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			if err != nil {
 				errorMessages = append(errorMessages, err.Error())
 			}
+			bucketPtr.Resources, errs = configuredBucketResources(ctx, regionClient, bucketPtr)
+			errorMessages = append(errorMessages, errs...)
 
 			s3Buckets = append(s3Buckets, bucketPtr)
 		}

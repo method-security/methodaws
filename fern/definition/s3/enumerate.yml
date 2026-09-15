@@ -64,6 +64,26 @@ types:
     properties:
       sseAlgorithm: optional<S3ServerSideEncryption>
       kmsKey: optional<common.KmsKeyReference>
+  S3PolicyRoleReference:
+    properties:
+      arn: string
+      roleName: optional<string>
+  S3IamRolePolicyStatement:
+    properties:
+      statement: string
+      principalRoles: optional<list<S3PolicyRoleReference>>
+      notPrincipalRoles: optional<list<S3PolicyRoleReference>>
+      conditionRoles: optional<list<S3PolicyRoleReference>>
+  S3NotificationFilterRule:
+    properties:
+      name: string
+      value: string
+  S3LambdaNotification:
+    properties:
+      id: optional<string>
+      function: common.LambdaReference
+      events: list<string>
+      filterRules: optional<list<S3NotificationFilterRule>>
 # S3 High level structs
   S3BucketIdentificationInfo:
     properties:
@@ -81,11 +101,16 @@ types:
       mfaDelete: optional<S3MFADeleteStatus>
       encryptionRules: optional<list<EncryptionRule>>
       accessControl: optional<S3BucketAccessControl>
+  S3BucketResourceInfo:
+    properties:
+      iamRolePolicyStatements: optional<list<S3IamRolePolicyStatement>>
+      lambdaNotifications: optional<list<S3LambdaNotification>>
 # Main S3 Bucket Structs
   S3Bucket:
     properties:
       identification: S3BucketIdentificationInfo
       configuration: S3BucketConfigurationInfo
+      resources: optional<S3BucketResourceInfo>
   S3EnumerateResult:
     properties:
       s3Buckets: optional<list<S3Bucket>>
