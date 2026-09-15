@@ -806,7 +806,7 @@ func convertClusterToFern(cluster *eksTypes.Cluster, region string) *eksfern.Eks
 
 	// Add service role reference
 	if cluster.RoleArn != nil {
-		configuration.ServiceRole = createIamRoleReference(*cluster.RoleArn, region)
+		configuration.ServiceRole = createIamRoleReference(*cluster.RoleArn)
 	}
 
 	// Add tags to configuration
@@ -853,7 +853,7 @@ func convertAccessConfigToFern(config *eksTypes.AccessConfigResponse) *eksfern.E
 // AWS Resource Reference Helper Functions
 
 // createIamRoleReference creates an IAM role reference from an ARN
-func createIamRoleReference(arn, region string) *common.IamRoleReference {
+func createIamRoleReference(arn string) *common.IamRoleReference {
 	if arn == "" {
 		return nil
 	}
@@ -868,7 +868,6 @@ func createIamRoleReference(arn, region string) *common.IamRoleReference {
 	return &common.IamRoleReference{
 		Arn:      arn,
 		RoleName: &roleName,
-		Region:   region,
 	}
 }
 
@@ -957,7 +956,7 @@ func discoverEksResourceReferences(cluster *eksTypes.Cluster, nodeGroups interfa
 
 	// Discover IAM role from cluster service role
 	if cluster.RoleArn != nil {
-		roleRef := createIamRoleReference(*cluster.RoleArn, region)
+		roleRef := createIamRoleReference(*cluster.RoleArn)
 		if roleRef != nil && !discoveredRoles[roleRef.Arn] {
 			iamRoles = append(iamRoles, roleRef)
 			discoveredRoles[roleRef.Arn] = true

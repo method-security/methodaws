@@ -28,7 +28,7 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 
 	normalizedSelectedRegions := selectedRegions
 	if len(selectedRegions) > 0 {
-		regions, err := normalizeSelectedRegions(selectedRegions)
+		regions, err := NormalizeSelectedRegions(selectedRegions)
 		if err != nil {
 			return nil, err
 		}
@@ -58,6 +58,9 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 			svc1log.SafeParam("regions", fallbackRegions),
 			svc1log.Stacktrace(err),
 		)
+		if len(normalizedSelectedRegions) == 0 {
+			return fallbackRegions, fmt.Errorf("AWS region coverage is incomplete; scanning only %s: %w", strings.Join(fallbackRegions, ", "), err)
+		}
 		return fallbackRegions, nil
 	}
 
@@ -70,7 +73,7 @@ func regionDiscoveryFallback(configRegion string, selectedRegions []string, disc
 		return selectedRegions, nil
 	}
 	if configRegion != "" {
-		regions, err := normalizeSelectedRegions([]string{configRegion})
+		regions, err := NormalizeSelectedRegions([]string{configRegion})
 		if err != nil {
 			return nil, fmt.Errorf("describe enabled AWS regions: %w; configured region is invalid: %v", discoveryErr, err)
 		}
@@ -161,7 +164,8 @@ func enabledAWSRegions(ctx context.Context, client describeRegionsAPI, selectedR
 	return sortedRegionNames(enabled), nil
 }
 
-func normalizeSelectedRegions(selectedRegions []string) ([]string, error) {
+// NormalizeSelectedRegions validates region syntax and partition, and removes duplicates without AWS API calls.
+func NormalizeSelectedRegions(selectedRegions []string) ([]string, error) {
 	selected := make(map[string]struct{}, len(selectedRegions))
 	partition := ""
 	for _, region := range selectedRegions {

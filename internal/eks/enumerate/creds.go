@@ -8,6 +8,7 @@ import (
 	"github.com/Method-Security/methodaws/internal/sts"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
 	"sigs.k8s.io/aws-iam-authenticator/pkg/token"
 )
 
@@ -71,10 +72,7 @@ func CredsEks(ctx context.Context, cfg aws.Config, clusterName string) (*eksfern
 			Errors: errors,
 		}, nil
 	}
-	opts := &token.GetTokenOptions{
-		ClusterID: aws.ToString(clusterOutput.Cluster.Name),
-	}
-	tok, err := gen.GetWithOptions(ctx, opts)
+	tok, err := gen.GetWithSTS(aws.ToString(clusterOutput.Cluster.Name), awssts.NewFromConfig(cfg))
 	if err != nil {
 		errors = append(errors, err.Error())
 		return &eksfern.EksCredentialReport{

@@ -99,7 +99,7 @@ func parseLambdaFunctionConfiguration(ctx context.Context, function types.Functi
 		parseErrors = append(parseErrors, err)
 	}
 
-	roleReference := createIamRoleReference(aws.ToString(function.Role), region)
+	roleReference := createIamRoleReference(aws.ToString(function.Role))
 	if roleReference == nil {
 		parseErrors = append(parseErrors, fmt.Errorf("missing or invalid execution role ARN %q", aws.ToString(function.Role)))
 	}
@@ -243,7 +243,7 @@ func createVpcReference(vpcID string, subnetIds []string, region string) *common
 	}
 }
 
-func createIamRoleReference(roleArn, region string) *common.IamRoleReference {
+func createIamRoleReference(roleArn string) *common.IamRoleReference {
 	parsed, err := arn.Parse(roleArn)
 	if err != nil || parsed.Partition == "" || parsed.AccountID == "" || parsed.Service != "iam" || parsed.Region != "" ||
 		!strings.HasPrefix(parsed.Resource, "role/") || strings.HasSuffix(parsed.Resource, "/") {
@@ -260,7 +260,6 @@ func createIamRoleReference(roleArn, region string) *common.IamRoleReference {
 	return &common.IamRoleReference{
 		Arn:      roleArn,
 		RoleName: roleNamePtr,
-		Region:   region,
 	}
 }
 

@@ -89,7 +89,7 @@ func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region str
 	for _, awsInstance := range awsInstances {
 		instance, errs := processInstance(ctx, awsInstance, region)
 		if instance != nil {
-			role, err := profileCache.resolveRole(ctx, iamClient, awsInstance.IamInstanceProfile, region)
+			role, err := profileCache.resolveRole(ctx, iamClient, awsInstance.IamInstanceProfile)
 			if err != nil {
 				errs = append(errs, err.Error())
 			}

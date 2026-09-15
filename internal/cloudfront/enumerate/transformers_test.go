@@ -23,6 +23,14 @@ func TestTransformDistributionRequiresEnabled(t *testing.T) {
 	assert.Equal(t, []string{"Distribution Enabled is nil"}, errs)
 }
 
+func TestDistributionDomainNameOmitsPlaceholder(t *testing.T) {
+	t.Parallel()
+	for _, value := range []*string{nil, aws.String(""), aws.String(" - ")} {
+		assert.Nil(t, distributionDomainName(value))
+	}
+	assert.Equal(t, aws.String("example.cloudfront.net"), distributionDomainName(aws.String("example.cloudfront.net")))
+}
+
 func TestTransformDistributionUsesExplicitEnabledStatus(t *testing.T) {
 	t.Parallel()
 

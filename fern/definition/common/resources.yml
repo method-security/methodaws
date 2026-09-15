@@ -18,7 +18,6 @@ types:
     properties:
       arn: string
       roleName: optional<string>
-      region: string
 # VPC Resources
   VpcReference:
     properties:

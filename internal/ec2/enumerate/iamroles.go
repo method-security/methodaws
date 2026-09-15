@@ -20,7 +20,7 @@ type instanceProfileResult struct {
 // Cache profile responses, including failures, by full ARN for this enumeration run.
 type instanceProfileCache map[string]instanceProfileResult
 
-func (cache instanceProfileCache) resolveRole(ctx context.Context, client *iamaws.Client, attached *types.IamInstanceProfile, region string) (*common.IamRoleReference, error) {
+func (cache instanceProfileCache) resolveRole(ctx context.Context, client *iamaws.Client, attached *types.IamInstanceProfile) (*common.IamRoleReference, error) {
 	if attached == nil {
 		return nil, nil
 	}
@@ -72,6 +72,5 @@ func (cache instanceProfileCache) resolveRole(ctx context.Context, client *iamaw
 	return &common.IamRoleReference{
 		Arn:      roleARN,
 		RoleName: roleName,
-		Region:   region,
 	}, nil
 }
