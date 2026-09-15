@@ -83,3 +83,12 @@ func awsPartitionForRegion(region string) (string, error) {
 		return "aws", nil
 	}
 }
+
+// IsCommercialAWSRegion reports whether region belongs to the standard commercial AWS partition.
+func IsCommercialAWSRegion(region string) (bool, error) {
+	partition, err := awsPartitionForRegion(region)
+	if err != nil {
+		return false, err
+	}
+	return partition == "aws", nil
+}

@@ -68,6 +68,9 @@ func TestCloudFrontWAFRegionRequiresCommercialPartition(t *testing.T) {
 	region, ok := cloudFrontWAFRegion("", []string{"us-west-2"})
 	assert.True(t, ok)
 	assert.Equal(t, "us-east-1", region)
+	region, ok = cloudFrontWAFRegion("", []string{"mx-central-1"})
+	assert.True(t, ok)
+	assert.Equal(t, "us-east-1", region)
 
 	_, ok = cloudFrontWAFRegion("", []string{"us-gov-west-1"})
 	assert.False(t, ok)

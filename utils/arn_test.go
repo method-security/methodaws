@@ -83,3 +83,15 @@ func TestBuildRegionalARNRejectsInvalidRegion(t *testing.T) {
 	_, err := BuildRegionalARN("not-a-region", "ec2", "123456789012", "instance/example")
 	require.EqualError(t, err, `invalid AWS region "not-a-region"`)
 }
+
+func TestIsCommercialAWSRegion(t *testing.T) {
+	t.Parallel()
+
+	commercial, err := IsCommercialAWSRegion("mx-central-1")
+	require.NoError(t, err)
+	assert.True(t, commercial)
+
+	commercial, err = IsCommercialAWSRegion("us-gov-west-1")
+	require.NoError(t, err)
+	assert.False(t, commercial)
+}

@@ -8,10 +8,10 @@ import (
 
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	waffern "github.com/Method-Security/methodaws/generated/go/waf"
+	methodawsutils "github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2/types"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
@@ -75,8 +75,8 @@ func cloudFrontWAFRegion(configRegion string, regions []string) (string, bool) {
 	if len(regions) > 0 {
 		region = regions[0]
 	}
-	partition, ok := endpoints.PartitionForRegion(endpoints.DefaultPartitions(), region)
-	if !ok || partition.ID() != endpoints.AwsPartitionID {
+	isCommercial, err := methodawsutils.IsCommercialAWSRegion(region)
+	if err != nil || !isCommercial {
 		return "", false
 	}
 	return "us-east-1", true
