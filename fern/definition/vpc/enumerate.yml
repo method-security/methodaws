@@ -26,10 +26,8 @@ types:
       - UNAVAILABLE
   SubnetHostnameType:
     enum:
-      - name: IP_NAME
-        value: ip-name
-      - name: RESOURCE_NAME
-        value: resource-name
+      - IP_NAME
+      - RESOURCE_NAME
 # Supporting Types
   AvailabilityZone:
     properties:

@@ -14,6 +14,13 @@ import (
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
+type vpcLinkBackendService string
+
+const (
+	vpcLinkBackendServiceElasticLoadBalancing vpcLinkBackendService = "elasticloadbalancing"
+	vpcLinkBackendServiceServiceDiscovery     vpcLinkBackendService = "servicediscovery"
+)
+
 // enumerateV2ApiGatewaysAllRegions enumerates v2 API Gateways (HTTP APIs) across all specified regions
 func enumerateV2ApiGatewaysAllRegions(ctx context.Context, awsConfig aws.Config, regions []string) ([]*apigatewayfern.ApiGatewayInstance, []string) {
 	log := svc1log.FromContext(ctx)
@@ -434,8 +441,8 @@ func createV2VpcLinkBackend(integration *apigatewayv2.GetIntegrationOutput) (*ap
 		return nil, fmt.Errorf("parse VPC Link integration URI %q: %w", uri, err)
 	}
 
-	switch parsed.Service {
-	case "elasticloadbalancing":
+	switch vpcLinkBackendService(parsed.Service) {
+	case vpcLinkBackendServiceElasticLoadBalancing:
 		parts := strings.Split(parsed.Resource, "/")
 		if len(parts) != 5 || parts[0] != "listener" || (parts[1] != "app" && parts[1] != "net") {
 			return nil, fmt.Errorf("VPC Link integration URI is not an ALB or NLB listener ARN: %s", uri)
@@ -454,7 +461,7 @@ func createV2VpcLinkBackend(integration *apigatewayv2.GetIntegrationOutput) (*ap
 				ListenerArn:      &listenerARN,
 			},
 		}, nil
-	case "servicediscovery":
+	case vpcLinkBackendServiceServiceDiscovery:
 		return &apigatewayfern.VpcLinkBackend{
 			Type: "service_discovery",
 			ServiceDiscovery: &apigatewayfern.ServiceDiscoveryBackend{

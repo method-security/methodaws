@@ -42,8 +42,14 @@ func locateBucketWithClient(ctx context.Context, client headBucketAPI, probeRegi
 			return false, "", nil
 		}
 		bucketRegion := responseError.HTTPResponse().Header.Get("X-Amz-Bucket-Region")
+		if statusCode == http.StatusForbidden {
+			if bucketRegion == "" {
+				bucketRegion = probeRegion
+			}
+			return true, bucketRegion, nil
+		}
 		if bucketRegion != "" && (statusCode == http.StatusMovedPermanently || statusCode == http.StatusTemporaryRedirect ||
-			statusCode == http.StatusBadRequest || statusCode == http.StatusForbidden) {
+			statusCode == http.StatusBadRequest) {
 			return true, bucketRegion, nil
 		}
 	}

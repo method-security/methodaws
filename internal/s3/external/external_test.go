@@ -55,6 +55,21 @@ func TestLocateBucketUsesRegionFromAccessDeniedResponse(t *testing.T) {
 	assert.Equal(t, "ap-southeast-2", region)
 }
 
+func TestLocateBucketUsesProbeRegionForAccessDeniedWithoutRegionHeader(t *testing.T) {
+	t.Parallel()
+
+	exists, region, err := locateBucketWithClient(context.Background(), &stubHeadBucketClient{
+		err: &smithyhttp.ResponseError{
+			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: http.StatusForbidden, Header: make(http.Header)}},
+			Err:      errors.New("access denied"),
+		},
+	}, "us-gov-west-1", "example-bucket")
+
+	require.NoError(t, err)
+	assert.True(t, exists)
+	assert.Equal(t, "us-gov-west-1", region)
+}
+
 func TestLocateBucketTreatsNotFoundAsAbsent(t *testing.T) {
 	t.Parallel()
 

@@ -274,7 +274,9 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 			EnableResourceNameDnsAaaaRecord: awsSubnet.PrivateDnsNameOptionsOnLaunch.EnableResourceNameDnsAAAARecord,
 		}
 		if awsSubnet.PrivateDnsNameOptionsOnLaunch.HostnameType != "" {
-			hostnameType, err := vpcfern.NewSubnetHostnameTypeFromString(string(awsSubnet.PrivateDnsNameOptionsOnLaunch.HostnameType))
+			hostnameType, err := vpcfern.NewSubnetHostnameTypeFromString(
+				strings.ToUpper(strings.ReplaceAll(string(awsSubnet.PrivateDnsNameOptionsOnLaunch.HostnameType), "-", "_")),
+			)
 			if err != nil {
 				errors = append(errors, err.Error())
 			} else {
