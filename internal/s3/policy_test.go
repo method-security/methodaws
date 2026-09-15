@@ -265,6 +265,78 @@ func TestAnalyzeBucketPolicy(t *testing.T) {
 			publicWrite: boolPointer(false),
 		},
 		{
+			name: "ForAnyValue negative allow requires the trusted key",
+			policy: `{
+					"Statement": [{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*",
+						"Condition": {"ForAnyValue:StringNotEquals": {"aws:SourceVpc": "vpc-12345678"}}
+					}]
+				}`,
+			publicRead:  boolPointer(false),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "ForAnyValue negative deny does not apply when the key is absent",
+			policy: `{
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": "*",
+							"Action": "s3:GetObject",
+							"Resource": "arn:aws:s3:::example-bucket/*"
+						},
+						{
+							"Effect": "Deny",
+							"Principal": "*",
+							"Action": "s3:GetObject",
+							"Resource": "arn:aws:s3:::example-bucket/*",
+							"Condition": {"ForAnyValue:StringNotEquals": {"aws:SourceVpc": "vpc-12345678"}}
+						}
+					]
+				}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "ForAnyValue negative IfExists allow applies when the key is absent",
+			policy: `{
+					"Statement": [{
+						"Effect": "Allow",
+						"Principal": "*",
+						"Action": "s3:GetObject",
+						"Resource": "arn:aws:s3:::example-bucket/*",
+						"Condition": {"ForAnyValue:StringNotEqualsIfExists": {"aws:SourceVpc": "vpc-12345678"}}
+					}]
+				}`,
+			publicRead:  boolPointer(true),
+			publicWrite: boolPointer(false),
+		},
+		{
+			name: "ForAnyValue negative IfExists deny applies when the key is absent",
+			policy: `{
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": "*",
+							"Action": "s3:GetObject",
+							"Resource": "arn:aws:s3:::example-bucket/*"
+						},
+						{
+							"Effect": "Deny",
+							"Principal": "*",
+							"Action": "s3:GetObject",
+							"Resource": "arn:aws:s3:::example-bucket/*",
+							"Condition": {"ForAnyValue:StringNotEqualsIfExists": {"aws:SourceVpc": "vpc-12345678"}}
+						}
+					]
+				}`,
+			publicRead:  boolPointer(false),
+			publicWrite: boolPointer(false),
+		},
+		{
 			name: "Null check makes ForAllValues require the trusted key",
 			policy: `{
 				"Statement": [{

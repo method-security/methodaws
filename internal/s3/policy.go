@@ -505,6 +505,9 @@ func classifyAllowConditionEntry(operator, key string, rawValues json.RawMessage
 			}
 			return conditionRestricted
 		}
+		if isForAnyValuesNegativeOperator(operator) {
+			return conditionRestricted
+		}
 		if isNegativeConditionOperator(operator) {
 			return conditionPublic
 		}
@@ -564,9 +567,22 @@ func isForAllValuesPositiveOperator(operator string) bool {
 
 func isNegativeConditionOperator(operator string) bool {
 	operator = strings.ToLower(operator)
+	if strings.HasPrefix(operator, "foranyvalue:") && !strings.HasSuffix(operator, "ifexists") {
+		return false
+	}
 	operator = strings.TrimPrefix(operator, "foranyvalue:")
 	operator = strings.TrimPrefix(operator, "forallvalues:")
 	operator = strings.TrimSuffix(operator, "ifexists")
+	return operator == "stringnotequals" || operator == "arnnotequals" ||
+		operator == "stringnotlike" || operator == "arnnotlike"
+}
+
+func isForAnyValuesNegativeOperator(operator string) bool {
+	operator = strings.ToLower(operator)
+	if !strings.HasPrefix(operator, "foranyvalue:") || strings.HasSuffix(operator, "ifexists") {
+		return false
+	}
+	operator = strings.TrimPrefix(operator, "foranyvalue:")
 	return operator == "stringnotequals" || operator == "arnnotequals" ||
 		operator == "stringnotlike" || operator == "arnnotlike"
 }
@@ -641,6 +657,9 @@ func classifyDenyCondition(condition map[string]map[string]json.RawMessage) deny
 			fixed, err := conditionValuesAreFixed(rawValues)
 			if err != nil || !fixed {
 				return denyUnknown
+			}
+			if isForAnyValuesNegativeOperator(operator) {
+				return denyDoesNotBlockPublic
 			}
 			if isNegativeConditionOperator(operator) {
 				return denyBlocksPublic
