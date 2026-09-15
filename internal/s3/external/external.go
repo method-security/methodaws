@@ -233,6 +233,10 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 			case "WRITE_ACP":
 				publicACL.AllowPublicWriteAcp = aws.Bool(true)
 			case "FULL_CONTROL":
+				publicACL.AllowPublicRead = aws.Bool(true)
+				publicACL.AllowPublicWrite = aws.Bool(true)
+				publicACL.AllowPublicReadAcp = aws.Bool(true)
+				publicACL.AllowPublicWriteAcp = aws.Bool(true)
 				publicACL.AllowPublicFullControl = aws.Bool(true)
 			}
 		}
@@ -250,6 +254,10 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 			case "WRITE_ACP":
 				authUserACL.AllowAuthenticatedUsersWriteAcp = aws.Bool(true)
 			case "FULL_CONTROL":
+				authUserACL.AllowAuthenticatedUsersRead = aws.Bool(true)
+				authUserACL.AllowAuthenticatedUsersWrite = aws.Bool(true)
+				authUserACL.AllowAuthenticatedUsersReadAcp = aws.Bool(true)
+				authUserACL.AllowAuthenticatedUsersWriteAcp = aws.Bool(true)
 				authUserACL.AllowAuthenticatedUsersFullControl = aws.Bool(true)
 			}
 		}
@@ -261,6 +269,9 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 			case "WRITE":
 				logDeliveryACL.AllowLogDeliveryWrite = aws.Bool(true)
 			case "READ_ACP":
+				logDeliveryACL.AllowLogDeliveryReadAcp = aws.Bool(true)
+			case "FULL_CONTROL":
+				logDeliveryACL.AllowLogDeliveryWrite = aws.Bool(true)
 				logDeliveryACL.AllowLogDeliveryReadAcp = aws.Bool(true)
 			}
 		}

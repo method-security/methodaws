@@ -6,13 +6,14 @@ import (
 	"strings"
 
 	// Internal
-	"github.com/Method-Security/methodaws/internal/s3"
+	s3enumerate "github.com/Method-Security/methodaws/internal/s3/enumerate"
+	s3external "github.com/Method-Security/methodaws/internal/s3/external"
+	s3list "github.com/Method-Security/methodaws/internal/s3/list"
 	"github.com/Method-Security/methodaws/utils"
 	"github.com/spf13/cobra"
 
 	// Generated
 	s3fern "github.com/Method-Security/methodaws/generated/go/s3"
-	external "github.com/Method-Security/methodaws/internal/s3/external"
 )
 
 // InitS3Command initializes the `methodaws s3` subcommand that deals with enumerating S3 buckets and their related resources.
@@ -47,7 +48,7 @@ func (a *MethodAws) InitS3Command() {
 			config := a.getS3EnumerateConfig(accountID, a.RootFlags.Regions)
 
 			// Get Report
-			report := s3.EnumerateS3(cmd.Context(), *a.AwsConfig, config)
+			report := s3enumerate.EnumerateS3(cmd.Context(), *a.AwsConfig, config)
 			a.setReport(report)
 		},
 	}
@@ -99,7 +100,7 @@ func (a *MethodAws) InitS3Command() {
 			config := getExternalS3BucketConfig(a.RootFlags.Regions, bucketURL, targetSeed, maxCandidates)
 
 			// Get Report
-			report := external.EnumerateS3(cmd.Context(), config)
+			report := s3external.EnumerateS3(cmd.Context(), config)
 			a.setReport(report)
 		},
 	}
@@ -136,7 +137,7 @@ func (a *MethodAws) InitS3Command() {
 			config := a.getS3ListConfig(accountID, bucketName)
 
 			// Return report
-			report := s3.ListS3Bucket(cmd.Context(), *a.AwsConfig, config)
+			report := s3list.ListS3Bucket(cmd.Context(), *a.AwsConfig, config)
 			a.setReport(report)
 		},
 	}

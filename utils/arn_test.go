@@ -95,3 +95,19 @@ func TestIsCommercialAWSRegion(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, commercial)
 }
+
+func TestAWSDNSSuffixForRegion(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"us-east-1":      "amazonaws.com",
+		"us-gov-west-1":  "amazonaws.com",
+		"cn-north-1":     "amazonaws.com.cn",
+		"eusc-de-east-1": "amazonaws.eu",
+	}
+	for region, expected := range tests {
+		actual, err := AWSDNSSuffixForRegion(region)
+		require.NoError(t, err)
+		assert.Equal(t, expected, actual)
+	}
+}

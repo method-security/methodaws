@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,4 +84,22 @@ func TestLocateBucketTreatsNotFoundAsAbsent(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, exists)
 	assert.Empty(t, region)
+}
+
+func TestProcessS3ACLGrantsExpandsFullControl(t *testing.T) {
+	t.Parallel()
+
+	accessControls := processS3ACLGrants([]types.Grant{
+		{
+			Grantee:    &types.Grantee{URI: aws.String("http://acs.amazonaws.com/groups/global/AllUsers")},
+			Permission: types.PermissionFullControl,
+		},
+	})
+
+	require.Len(t, accessControls, 1)
+	assert.True(t, aws.ToBool(accessControls[0].AllowPublicRead))
+	assert.True(t, aws.ToBool(accessControls[0].AllowPublicWrite))
+	assert.True(t, aws.ToBool(accessControls[0].AllowPublicReadAcp))
+	assert.True(t, aws.ToBool(accessControls[0].AllowPublicWriteAcp))
+	assert.True(t, aws.ToBool(accessControls[0].AllowPublicFullControl))
 }
