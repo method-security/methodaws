@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	eksTypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -120,23 +121,26 @@ func processCluster(ctx context.Context, cfg aws.Config, eksSvc *eks.Client, clu
 		errors = append(errors, "Cluster is nil")
 		return nil, errors
 	}
-	if clusterDetail.Cluster.Name == nil {
-		log.Warn("Cluster name is nil for cluster", svc1log.SafeParam("clusterName", clusterName))
-		errors = append(errors, "Cluster name is nil")
+	if aws.ToString(clusterDetail.Cluster.Name) == "" {
+		log.Warn("Cluster name is empty", svc1log.SafeParam("clusterName", clusterName))
+		errors = append(errors, "Cluster name is empty")
 		return nil, errors
 	}
-	if clusterDetail.Cluster.Arn == nil {
-		log.Warn("Cluster ARN is nil for cluster", svc1log.SafeParam("clusterName", clusterName))
-		errors = append(errors, "Cluster ARN is nil")
+	if aws.ToString(clusterDetail.Cluster.Arn) == "" {
+		log.Warn("Cluster ARN is empty", svc1log.SafeParam("clusterName", clusterName))
+		errors = append(errors, "Cluster ARN is empty")
 		return nil, errors
 	}
 
 	// Convert cluster to Fern format with new structure
 	cluster := convertClusterToFern(clusterDetail.Cluster, region)
+	if cluster == nil {
+		return nil, []string{fmt.Sprintf("Cluster %s has an incomplete identity or region", clusterName)}
+	}
 
 	// Enumerate Kubernetes resources (nodes with nested pods, external services) if cluster is active
 	if clusterDetail.Cluster.Status == eksTypes.ClusterStatusActive && clusterDetail.Cluster.Endpoint != nil {
-		nodes, services, k8sErrors := enumerateKubernetesResources(ctx, cfg, clusterDetail.Cluster, region)
+		nodes, pods, services, k8sErrors := enumerateKubernetesResources(ctx, cfg, clusterDetail.Cluster, region)
 		errors = append(errors, k8sErrors...)
 
 		if cluster.Resources == nil {
@@ -146,6 +150,9 @@ func processCluster(ctx context.Context, cfg aws.Config, eksSvc *eks.Client, clu
 		if len(nodes) > 0 {
 			cluster.Resources.Nodes = nodes
 		}
+		if len(pods) > 0 {
+			cluster.Resources.Pods = pods
+		}
 		if len(services) > 0 {
 			cluster.Resources.Services = services
 		}
@@ -154,17 +161,18 @@ func processCluster(ctx context.Context, cfg aws.Config, eksSvc *eks.Client, clu
 	return cluster, errors
 }
 
-// enumerateKubernetesResources enumerates nodes and external services from an active EKS cluster (pods are nested under nodes)
-func enumerateKubernetesResources(ctx context.Context, cfg aws.Config, cluster *eksTypes.Cluster, region string) ([]*eksfern.KubernetesNode, []*eksfern.KubernetesService, []string) {
+// enumerateKubernetesResources retains pods independently of node enumeration.
+func enumerateKubernetesResources(ctx context.Context, cfg aws.Config, cluster *eksTypes.Cluster, region string) ([]*eksfern.KubernetesNode, []*eksfern.KubernetesPod, []*eksfern.KubernetesService, []string) {
 	var fernNodes []*eksfern.KubernetesNode
+	var fernPods []*eksfern.KubernetesPod
 	var fernServices []*eksfern.KubernetesService
 	var errors []string
 
 	log := svc1log.FromContext(ctx)
 
-	if cluster.Name == nil || cluster.Endpoint == nil {
-		errors = append(errors, "Cluster name or endpoint is nil")
-		return fernNodes, fernServices, errors
+	if cluster == nil || aws.ToString(cluster.Name) == "" || aws.ToString(cluster.Endpoint) == "" {
+		errors = append(errors, "Cluster name or endpoint is empty")
+		return fernNodes, fernPods, fernServices, errors
 	}
 
 	log.Info("Enumerating Kubernetes resources for cluster", svc1log.SafeParam("clusterName", *cluster.Name))
@@ -173,7 +181,7 @@ func enumerateKubernetesResources(ctx context.Context, cfg aws.Config, cluster *
 	kubeClient, err := createKubernetesClient(ctx, cfg, cluster)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("Failed to create Kubernetes client for cluster %s: %s", *cluster.Name, err.Error()))
-		return fernNodes, fernServices, errors
+		return fernNodes, fernPods, fernServices, errors
 	}
 
 	// Get raw Kubernetes resources - collect what we can, don't discard on partial failure
@@ -203,11 +211,14 @@ func enumerateKubernetesResources(ctx context.Context, cfg aws.Config, cluster *
 	for _, pod := range podList.Items {
 		fernPod := convertPodToFern(&pod, region)
 		if fernPod != nil {
-			// Add service relationships (deduplicated)
+			// Each listed service contributes at most one reference to this pod.
 			if services, exists := podServiceMap[getPodKey(&pod)]; exists && len(services) > 0 {
-				fernPod.Resources.Services = deduplicateStrings(services)
+				fernPod.Resources.Services = services
 			}
 			podMap[getPodKey(&pod)] = fernPod
+			fernPods = append(fernPods, fernPod)
+		} else {
+			errors = append(errors, fmt.Sprintf("Pod %s in cluster %s has an incomplete identity", getPodKey(&pod), *cluster.Name))
 		}
 	}
 
@@ -223,6 +234,8 @@ func enumerateKubernetesResources(ctx context.Context, cfg aws.Config, cluster *
 				fernNode.Resources.Pods = pods
 			}
 			fernNodes = append(fernNodes, fernNode)
+		} else {
+			errors = append(errors, fmt.Sprintf("Node %s in cluster %s has an incomplete identity", node.Name, *cluster.Name))
 		}
 	}
 
@@ -239,6 +252,8 @@ func enumerateKubernetesResources(ctx context.Context, cfg aws.Config, cluster *
 					fernService.Resources.TargetPods = podIds
 				}
 				fernServices = append(fernServices, fernService)
+			} else {
+				errors = append(errors, fmt.Sprintf("Service %s in cluster %s has an incomplete identity", getServiceKey(&service), *cluster.Name))
 			}
 		}
 	}
@@ -248,27 +263,32 @@ func enumerateKubernetesResources(ctx context.Context, cfg aws.Config, cluster *
 		svc1log.SafeParam("nodeCount", len(fernNodes)),
 		svc1log.SafeParam("serviceCount", len(fernServices)))
 
-	return fernNodes, fernServices, errors
+	return fernNodes, fernPods, fernServices, errors
 }
 
 // createKubernetesClient creates a Kubernetes client for the EKS cluster
 func createKubernetesClient(ctx context.Context, cfg aws.Config, cluster *eksTypes.Cluster) (*kubernetes.Clientset, error) {
+	if cluster == nil || aws.ToString(cluster.Name) == "" || aws.ToString(cluster.Endpoint) == "" {
+		return nil, fmt.Errorf("cluster name or endpoint is empty")
+	}
 	// Create token generator for AWS IAM authentication
 	tokenGenerator, err := token.NewGenerator(true, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create token generator: %w", err)
 	}
 
-	// Generate token
-	tok, err := tokenGenerator.GetWithOptions(ctx, &token.GetTokenOptions{
-		ClusterID: *cluster.Name,
-	})
+	// Use the selected credentials/region, not a newly loaded default AWS config.
+	clusterID := aws.ToString(cluster.Id)
+	if clusterID == "" {
+		clusterID = aws.ToString(cluster.Name)
+	}
+	tok, err := tokenGenerator.GetWithSTS(clusterID, awssts.NewFromConfig(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
 
 	// Decode the certificate authority data
-	if cluster.CertificateAuthority == nil || cluster.CertificateAuthority.Data == nil {
+	if cluster.CertificateAuthority == nil || aws.ToString(cluster.CertificateAuthority.Data) == "" {
 		return nil, fmt.Errorf("cluster %s has no certificate authority data", *cluster.Name)
 	}
 	caCert, err := base64.StdEncoding.DecodeString(*cluster.CertificateAuthority.Data)
@@ -347,43 +367,36 @@ func isIPAddress(host string) bool {
 }
 
 // buildServicePodRelationships builds bidirectional relationships between services and pods
-func buildServicePodRelationships(services []v1.Service, pods []v1.Pod, region string) (map[string][]*eksfern.KubernetesPodIdentificationInfo, map[string][]string) {
+func buildServicePodRelationships(services []v1.Service, pods []v1.Pod, region string) (map[string][]*eksfern.KubernetesPodIdentificationInfo, map[string][]*eksfern.KubernetesServiceIdentificationInfo) {
 	// servicePodMap: service key -> list of pod identification info
 	servicePodMap := make(map[string][]*eksfern.KubernetesPodIdentificationInfo)
-	// podServiceMap: pod key -> list of service names
-	podServiceMap := make(map[string][]string)
+	// podServiceMap: pod key -> list of identified services
+	podServiceMap := make(map[string][]*eksfern.KubernetesServiceIdentificationInfo)
 
 	for _, service := range services {
+		serviceID := serviceIdentification(&service, region)
+		if serviceID == nil || service.Spec.Type == v1.ServiceTypeExternalName {
+			continue
+		}
 		serviceKey := getServiceKey(&service)
 		var targetPodIds []*eksfern.KubernetesPodIdentificationInfo
 
 		// Check if service has a selector
 		if len(service.Spec.Selector) > 0 {
 			for _, pod := range pods {
+				podID := podIdentification(&pod, region)
+				if podID == nil || pod.Namespace != service.Namespace {
+					continue
+				}
 				// Check if pod matches service selector
 				if podMatchesServiceSelector(&pod, service.Spec.Selector) {
 					podKey := getPodKey(&pod)
-					serviceName := fmt.Sprintf("%s/%s", service.Namespace, service.Name)
-
-					// Create pod identification info
-					podID := &eksfern.KubernetesPodIdentificationInfo{
-						Name:      pod.Name,
-						Namespace: pod.Namespace,
-						Region:    region,
-					}
-					if pod.UID != "" {
-						uid := string(pod.UID)
-						podID.Uid = &uid
-					}
 
 					// Add to service -> pods mapping
 					targetPodIds = append(targetPodIds, podID)
 
 					// Add to pod -> services mapping
-					if _, exists := podServiceMap[podKey]; !exists {
-						podServiceMap[podKey] = []string{}
-					}
-					podServiceMap[podKey] = append(podServiceMap[podKey], serviceName)
+					podServiceMap[podKey] = append(podServiceMap[podKey], serviceID)
 				}
 			}
 		}
@@ -422,22 +435,23 @@ func podMatchesServiceSelector(pod *v1.Pod, selector map[string]string) bool {
 	return true
 }
 
-// convertPodToFern converts a Kubernetes Pod to Fern format (simplified)
-func convertPodToFern(pod *v1.Pod, region string) *eksfern.KubernetesPod {
-	if pod == nil {
+func podIdentification(pod *v1.Pod, region string) *eksfern.KubernetesPodIdentificationInfo {
+	if pod == nil || pod.Name == "" || pod.Namespace == "" || pod.UID == "" || region == "" {
 		return nil
 	}
-
-	// Create identification
-	identification := &eksfern.KubernetesPodIdentificationInfo{
+	return &eksfern.KubernetesPodIdentificationInfo{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
+		Uid:       string(pod.UID),
 		Region:    region,
 	}
+}
 
-	if pod.UID != "" {
-		uid := string(pod.UID)
-		identification.Uid = &uid
+// convertPodToFern converts a Kubernetes Pod to Fern format (simplified)
+func convertPodToFern(pod *v1.Pod, region string) *eksfern.KubernetesPod {
+	identification := podIdentification(pod, region)
+	if identification == nil {
+		return nil
 	}
 
 	// Create configuration
@@ -449,6 +463,12 @@ func convertPodToFern(pod *v1.Pod, region string) *eksfern.KubernetesPod {
 
 	if pod.Spec.NodeName != "" {
 		configuration.NodeName = &pod.Spec.NodeName
+	}
+	if pod.Spec.Hostname != "" {
+		configuration.Hostname = &pod.Spec.Hostname
+	}
+	if pod.Spec.Subdomain != "" {
+		configuration.Subdomain = &pod.Spec.Subdomain
 	}
 
 	if !pod.CreationTimestamp.IsZero() {
@@ -477,7 +497,6 @@ func convertPodToFern(pod *v1.Pod, region string) *eksfern.KubernetesPod {
 
 	// Extract IP addresses from pod status
 	var ipAddresses []string
-	var fqdns []string
 
 	// Add primary pod IP
 	if pod.Status.PodIP != "" {
@@ -491,21 +510,9 @@ func convertPodToFern(pod *v1.Pod, region string) *eksfern.KubernetesPod {
 		}
 	}
 
-	// Extract FQDN from hostname and subdomain if available
-	if pod.Spec.Hostname != "" {
-		hostname := pod.Spec.Hostname
-		if pod.Spec.Subdomain != "" {
-			hostname = fmt.Sprintf("%s.%s", pod.Spec.Hostname, pod.Spec.Subdomain)
-		}
-		fqdns = append(fqdns, hostname)
-	}
-
-	// Set IP addresses and FQDNs if we found any (deduplicated)
+	// Hostname/subdomain alone do not establish a fully qualified DNS name.
 	if len(ipAddresses) > 0 {
 		resources.IpAddresses = deduplicateStrings(ipAddresses)
-	}
-	if len(fqdns) > 0 {
-		resources.Fqdns = deduplicateStrings(fqdns)
 	}
 
 	return &eksfern.KubernetesPod{
@@ -517,19 +524,15 @@ func convertPodToFern(pod *v1.Pod, region string) *eksfern.KubernetesPod {
 
 // convertNodeToFern converts a Kubernetes Node to Fern format (simplified)
 func convertNodeToFern(node *v1.Node, region string) *eksfern.KubernetesNode {
-	if node == nil {
+	if node == nil || node.Name == "" || node.UID == "" || region == "" {
 		return nil
 	}
 
 	// Create identification
 	identification := &eksfern.KubernetesNodeIdentificationInfo{
 		Name:   node.Name,
+		Uid:    string(node.UID),
 		Region: region,
-	}
-
-	if node.UID != "" {
-		uid := string(node.UID)
-		identification.Uid = &uid
 	}
 
 	// Create configuration
@@ -583,11 +586,16 @@ func convertNodeToFern(node *v1.Node, region string) *eksfern.KubernetesNode {
 		var fqdns []string
 
 		for _, addr := range node.Status.Addresses {
+			if addr.Address == "" {
+				continue
+			}
 			switch addr.Type {
 			case v1.NodeInternalIP, v1.NodeExternalIP:
 				ipAddresses = append(ipAddresses, addr.Address)
-			case v1.NodeInternalDNS, v1.NodeExternalDNS, v1.NodeHostName:
+			case v1.NodeInternalDNS, v1.NodeExternalDNS:
 				fqdns = append(fqdns, addr.Address)
+			case v1.NodeHostName:
+				configuration.Hostname = aws.String(addr.Address)
 			}
 		}
 
@@ -606,22 +614,23 @@ func convertNodeToFern(node *v1.Node, region string) *eksfern.KubernetesNode {
 	}
 }
 
-// convertServiceToFern converts a Kubernetes Service to Fern format (simplified for external access)
-func convertServiceToFern(service *v1.Service, region string) *eksfern.KubernetesService {
-	if service == nil {
+func serviceIdentification(service *v1.Service, region string) *eksfern.KubernetesServiceIdentificationInfo {
+	if service == nil || service.Name == "" || service.Namespace == "" || service.UID == "" || region == "" {
 		return nil
 	}
-
-	// Create identification
-	identification := &eksfern.KubernetesServiceIdentificationInfo{
+	return &eksfern.KubernetesServiceIdentificationInfo{
 		Name:      service.Name,
 		Namespace: service.Namespace,
+		Uid:       string(service.UID),
 		Region:    region,
 	}
+}
 
-	if service.UID != "" {
-		uid := string(service.UID)
-		identification.Uid = &uid
+// convertServiceToFern converts a Kubernetes Service to Fern format (simplified for external access)
+func convertServiceToFern(service *v1.Service, region string) *eksfern.KubernetesService {
+	identification := serviceIdentification(service, region)
+	if identification == nil {
+		return nil
 	}
 
 	// Create configuration
@@ -767,13 +776,13 @@ func convertPodStatusToEnum(phase v1.PodPhase) *eksfern.PodStatus {
 	case v1.PodUnknown:
 		return eksfern.PodStatusUnknown.Ptr()
 	default:
-		return eksfern.PodStatusUnknown.Ptr()
+		return nil
 	}
 }
 
 // convertClusterToFern converts AWS EKS cluster to Fern format with new structure
 func convertClusterToFern(cluster *eksTypes.Cluster, region string) *eksfern.EksInstance {
-	if cluster == nil || cluster.Arn == nil || cluster.Name == nil {
+	if cluster == nil || aws.ToString(cluster.Arn) == "" || aws.ToString(cluster.Name) == "" || region == "" {
 		return nil
 	}
 

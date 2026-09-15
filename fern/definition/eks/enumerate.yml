@@ -40,29 +40,32 @@ types:
     properties:
       name: string
       namespace: string
-      uid: optional<string>
+      uid: string
       region: string
   KubernetesPodConfigurationInfo:
     properties:
       status: optional<PodStatus>
       nodeName: optional<string>
+      hostname: optional<string>
+      subdomain: optional<string>
       createdAt: optional<datetime>
       labels: optional<map<string, string>>
       annotations: optional<map<string, string>>
       containers: optional<list<string>>
   KubernetesPodResourceInfo:
     properties:
-      services: optional<list<string>>
+      services: optional<list<KubernetesServiceIdentificationInfo>>
       ipAddresses: optional<list<string>>
       fqdns: optional<list<string>>
 # Kubernetes Node Structures  
   KubernetesNodeIdentificationInfo:
     properties:
       name: string
-      uid: optional<string>
+      uid: string
       region: string
   KubernetesNodeConfigurationInfo:
     properties:
+      hostname: optional<string>
       createdAt: optional<datetime>
       labels: optional<map<string, string>>
       annotations: optional<map<string, string>>
@@ -90,7 +93,7 @@ types:
     properties:
       name: string
       namespace: string
-      uid: optional<string>
+      uid: string
       region: string
   KubernetesServiceConfigurationInfo:
     properties:
@@ -101,7 +104,9 @@ types:
       selector: optional<map<string, string>>
   KubernetesServiceResourceInfo:
     properties:
-      targetPods: optional<list<KubernetesPodIdentificationInfo>>
+      targetPods:
+        type: optional<list<KubernetesPodIdentificationInfo>>
+        docs: Pods selected in this service's namespace, not a statement of endpoint readiness.
       clusterIpAddress: optional<string>
       externalIpAddresses: optional<list<string>>
       externalEndpoints: optional<list<ServiceEndpoint>>
@@ -133,6 +138,7 @@ types:
       kmsKeys: optional<list<common.KmsKeyReference>>
       cloudWatchLogs: optional<list<common.CloudWatchLogReference>>
       nodes: optional<list<KubernetesNode>>
+      pods: optional<list<KubernetesPod>>
       services: optional<list<KubernetesService>>
 # Main Kubernetes Structs (following Lambda pattern)
   KubernetesPod:
