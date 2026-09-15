@@ -236,16 +236,17 @@ func certificatesFromListener(certificates []types.Certificate) []*loadbalancerf
 
 func mergeCertificates(certificateGroups ...[]*loadbalancerfern.Certificate) []*loadbalancerfern.Certificate {
 	var result []*loadbalancerfern.Certificate
-	seen := make(map[string]struct{})
+	byARN := make(map[string]*loadbalancerfern.Certificate)
 	for _, certificates := range certificateGroups {
 		for _, certificate := range certificates {
 			if certificate == nil {
 				continue
 			}
-			if _, ok := seen[certificate.Arn]; ok {
+			if existing, ok := byARN[certificate.Arn]; ok {
+				existing.IsDefault = existing.IsDefault || certificate.IsDefault
 				continue
 			}
-			seen[certificate.Arn] = struct{}{}
+			byARN[certificate.Arn] = certificate
 			result = append(result, certificate)
 		}
 	}

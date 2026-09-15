@@ -67,6 +67,32 @@ func TestListenerRetainsDefaultCertificateWhenCertificateListingFails(t *testing
 	assert.True(t, listeners[0].Certificates[0].IsDefault)
 }
 
+func TestListenerCertificateMergePreservesDefaultFlag(t *testing.T) {
+	t.Parallel()
+
+	client := &stubELBV2ResourceClient{
+		listenerOutput: &elasticloadbalancingv2.DescribeListenersOutput{Listeners: []elbv2types.Listener{{
+			ListenerArn: aws.String("listener"),
+			Certificates: []elbv2types.Certificate{{
+				CertificateArn: aws.String("default-certificate"),
+			}},
+		}}},
+		certificatePages: []*elasticloadbalancingv2.DescribeListenerCertificatesOutput{{
+			Certificates: []elbv2types.Certificate{{
+				CertificateArn: aws.String("default-certificate"),
+				IsDefault:      aws.Bool(true),
+			}},
+		}},
+	}
+
+	listeners, errs := listenersForLoadBalancerV2(context.Background(), client, aws.String("load-balancer"))
+
+	require.Empty(t, errs)
+	require.Len(t, listeners, 1)
+	require.Len(t, listeners[0].Certificates, 1)
+	assert.True(t, listeners[0].Certificates[0].IsDefault)
+}
+
 func (s *stubELBV2ResourceClient) DescribeTargetGroups(
 	_ context.Context,
 	input *elasticloadbalancingv2.DescribeTargetGroupsInput,
