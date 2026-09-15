@@ -85,8 +85,12 @@ func TestEnabledAWSRegionsHandlesMissingResponseAndErrors(t *testing.T) {
 	_, err := enabledAWSRegions(context.Background(), stubDescribeRegionsClient{}, nil)
 	require.EqualError(t, err, "describe enabled AWS regions returned no response")
 
-	_, err = enabledAWSRegions(context.Background(), stubDescribeRegionsClient{err: errors.New("denied")}, nil)
+	requestErr := errors.New("denied")
+	_, err = enabledAWSRegions(context.Background(), stubDescribeRegionsClient{err: requestErr}, nil)
 	require.EqualError(t, err, "describe enabled AWS regions: denied")
+	var discoveryErr *describeRegionsRequestError
+	require.ErrorAs(t, err, &discoveryErr)
+	require.ErrorIs(t, err, requestErr)
 }
 
 func TestRegionDiscoveryFallback(t *testing.T) {

@@ -3,6 +3,7 @@ package utils
 import (
 	// Standard
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -42,6 +43,11 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 	queryConfig.Region = queryRegion
 	regions, err := enabledAWSRegions(ctx, ec2.NewFromConfig(queryConfig), normalizedSelectedRegions)
 	if err != nil {
+		var discoveryErr *describeRegionsRequestError
+		if !errors.As(err, &discoveryErr) {
+			log.Error("Failed to validate enabled AWS regions", svc1log.SafeParam("region", queryRegion), svc1log.Stacktrace(err))
+			return nil, err
+		}
 		fallbackRegions, fallbackErr := regionDiscoveryFallback(cfg.Region, normalizedSelectedRegions, err)
 		if fallbackErr != nil {
 			log.Error("Failed to discover enabled AWS regions", svc1log.SafeParam("region", queryRegion), svc1log.Stacktrace(err))
@@ -109,10 +115,22 @@ type describeRegionsAPI interface {
 	DescribeRegions(context.Context, *ec2.DescribeRegionsInput, ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error)
 }
 
+type describeRegionsRequestError struct {
+	err error
+}
+
+func (e *describeRegionsRequestError) Error() string {
+	return fmt.Sprintf("describe enabled AWS regions: %v", e.err)
+}
+
+func (e *describeRegionsRequestError) Unwrap() error {
+	return e.err
+}
+
 func enabledAWSRegions(ctx context.Context, client describeRegionsAPI, selectedRegions []string) ([]string, error) {
 	output, err := client.DescribeRegions(ctx, &ec2.DescribeRegionsInput{AllRegions: aws.Bool(false)})
 	if err != nil {
-		return nil, fmt.Errorf("describe enabled AWS regions: %w", err)
+		return nil, &describeRegionsRequestError{err: err}
 	}
 	if output == nil {
 		return nil, fmt.Errorf("describe enabled AWS regions returned no response")
