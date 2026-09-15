@@ -24,6 +24,8 @@ types:
       - PENDING
       - AVAILABLE
       - UNAVAILABLE
+      - FAILED
+      - FAILED_INSUFFICIENT_CAPACITY
   SubnetHostnameType:
     enum:
       - IP_NAME
@@ -31,7 +33,7 @@ types:
 # Supporting Types
   AvailabilityZone:
     properties:
-      zoneId: optional<string>
+      zoneId: string
       zoneName: optional<string>
       networkBorderGroup: optional<string>
       parentZoneId: optional<string>
@@ -43,6 +45,7 @@ types:
     properties:
       associationId: string
       cidrBlock: string
+      state: optional<string>
   PrivateDnsNameOptionsOnLaunch:
     properties:
       hostnameType: optional<SubnetHostnameType>
