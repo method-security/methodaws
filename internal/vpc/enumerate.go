@@ -2,6 +2,8 @@ package vpc
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
 	"strings"
 
 	common "github.com/Method-Security/methodaws/generated/go/common"
@@ -62,6 +64,9 @@ func EnumerateVPC(ctx context.Context, awsConfig aws.Config, config vpcfern.VpcE
 }
 
 func enumerateVPCWithSubnetsForRegion(ctx context.Context, cfg aws.Config, region string) ([]*vpcfern.VpcInstance, []string) {
+	if strings.TrimSpace(region) == "" {
+		return nil, []string{"Cannot enumerate VPCs/subnets without a region"}
+	}
 	log := svc1log.FromContext(ctx)
 	regionCfg := cfg.Copy()
 	regionCfg.Region = region
@@ -81,16 +86,15 @@ func enumerateVPCWithSubnetsForRegion(ctx context.Context, cfg aws.Config, regio
 			log.Warn("Failed to retrieve VPCs page",
 				svc1log.SafeParam("region", region),
 				svc1log.Stacktrace(err))
-			errors = append(errors, err.Error())
+			errors = append(errors, fmt.Sprintf("DescribeVpcs in %s: %v", region, err))
+			break
+		}
+		if result == nil {
+			errors = append(errors, fmt.Sprintf("DescribeVpcs in %s returned no response", region))
 			break
 		}
 
 		for _, vpc := range result.Vpcs {
-			if vpc.VpcId == nil {
-				log.Warn("VPC ID is nil", svc1log.SafeParam("vpc", vpc))
-				errors = append(errors, "VPC ID is nil")
-				continue
-			}
 			vpcInstance, errs := convertAWSVPCToFern(vpc, region)
 			if vpcInstance != nil {
 				vpcs = append(vpcs, vpcInstance)
@@ -109,33 +113,39 @@ func enumerateVPCWithSubnetsForRegion(ctx context.Context, cfg aws.Config, regio
 			log.Warn("Failed to retrieve Subnets page",
 				svc1log.SafeParam("region", region),
 				svc1log.Stacktrace(err))
-			errors = append(errors, err.Error())
+			errors = append(errors, fmt.Sprintf("DescribeSubnets in %s: %v", region, err))
+			break
+		}
+		if result == nil {
+			errors = append(errors, fmt.Sprintf("DescribeSubnets in %s returned no response", region))
 			break
 		}
 
 		for _, subnet := range result.Subnets {
-			// check if the subnet has an ID
-			if subnet.SubnetId == nil {
-				log.Warn("Subnet ID is nil", svc1log.SafeParam("subnet", subnet))
-				errors = append(errors, "Subnet ID is nil")
+			subnetConverted, errs := convertAWSSubnetToFern(subnet, region)
+			errors = append(errors, errs...)
+			if subnetConverted == nil {
 				continue
 			}
-
-			// Convert the subnet to a Fern subnet
-			subnetConverted, errs := convertAWSSubnetToFern(subnet, region)
-			if subnetConverted != nil && subnet.VpcId != nil {
-				// Find the VPC this subnet belongs to using the AWS subnet's VPC ID
-				if vpcInstance, exists := vpcMap[*subnet.VpcId]; exists {
-					if vpcInstance.Resources == nil {
-						vpcInstance.Resources = &vpcfern.VpcResourceInfo{}
-					}
-					if vpcInstance.Resources.Subnets == nil {
-						vpcInstance.Resources.Subnets = []*vpcfern.Subnet{}
-					}
-					vpcInstance.Resources.Subnets = append(vpcInstance.Resources.Subnets, subnetConverted)
-				}
+			if !hasValue(subnet.VpcId) {
+				errors = append(errors, fmt.Sprintf("Subnet %s in %s has no parent VPC ID", subnetConverted.Identification.Id, region))
+				continue
 			}
-			errors = append(errors, errs...)
+			vpcInstance, exists := vpcMap[*subnet.VpcId]
+			if !exists {
+				// The subnet supplies the parent identity, but not the parent's configuration or owner.
+				vpcInstance = &vpcfern.VpcInstance{
+					Identification: &vpcfern.VpcIdentificationInfo{Id: *subnet.VpcId, Region: region},
+					Configuration:  &vpcfern.VpcConfigurationInfo{},
+				}
+				vpcMap[*subnet.VpcId] = vpcInstance
+				vpcs = append(vpcs, vpcInstance)
+				errors = append(errors, fmt.Sprintf("VPC %s in %s details unavailable; retaining parent identity reported by subnets", *subnet.VpcId, region))
+			}
+			if vpcInstance.Resources == nil {
+				vpcInstance.Resources = &vpcfern.VpcResourceInfo{}
+			}
+			vpcInstance.Resources.Subnets = append(vpcInstance.Resources.Subnets, subnetConverted)
 		}
 	}
 
@@ -145,8 +155,8 @@ func enumerateVPCWithSubnetsForRegion(ctx context.Context, cfg aws.Config, regio
 // convertAWSVPCToFern converts an AWS VPC to a Fern VPC
 func convertAWSVPCToFern(awsVPC ec2types.Vpc, region string) (*vpcfern.VpcInstance, []string) {
 	errors := []string{}
-	if awsVPC.VpcId == nil {
-		return nil, errors
+	if !hasValue(awsVPC.VpcId) || strings.TrimSpace(region) == "" {
+		return nil, []string{fmt.Sprintf("Cannot identify VPC: missing VPC ID or region (id=%q, region=%q)", aws.ToString(awsVPC.VpcId), region)}
 	}
 
 	// Convert AWS VPC tags to Fern tags and extract name
@@ -188,18 +198,34 @@ func convertAWSVPCToFern(awsVPC ec2types.Vpc, region string) (*vpcfern.VpcInstan
 
 	// Add IPv4 CIDR block associations
 	for _, assoc := range awsVPC.CidrBlockAssociationSet {
-		cidrAssociations = append(cidrAssociations, &vpcfern.VpcCidrBlockAssociation{
-			AssociationId: aws.ToString(assoc.AssociationId),
-			CidrBlock:     aws.ToString(assoc.CidrBlock),
-		})
+		var associationState string
+		if assoc.CidrBlockState != nil {
+			associationState = string(assoc.CidrBlockState.State)
+		}
+		converted, err := convertCIDRAssociation(assoc.AssociationId, assoc.CidrBlock, associationState, false)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("VPC %s in %s IPv4 association: %v", *awsVPC.VpcId, region, err))
+			continue
+		}
+		cidrAssociations = append(cidrAssociations, converted)
 	}
 
 	// Add IPv6 CIDR block associations
 	for _, assoc := range awsVPC.Ipv6CidrBlockAssociationSet {
-		cidrAssociations = append(cidrAssociations, &vpcfern.VpcCidrBlockAssociation{
-			AssociationId: aws.ToString(assoc.AssociationId),
-			CidrBlock:     aws.ToString(assoc.Ipv6CidrBlock),
-		})
+		var associationState string
+		if assoc.Ipv6CidrBlockState != nil {
+			associationState = string(assoc.Ipv6CidrBlockState.State)
+		}
+		converted, err := convertCIDRAssociation(assoc.AssociationId, assoc.Ipv6CidrBlock, associationState, true)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("VPC %s in %s IPv6 association: %v", *awsVPC.VpcId, region, err))
+			continue
+		}
+		cidrAssociations = append(cidrAssociations, converted)
+	}
+	creationCIDR, err := validatedCIDR(awsVPC.CidrBlock, false)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("VPC %s in %s primary CIDR: %v", *awsVPC.VpcId, region, err))
 	}
 
 	vpc := &vpcfern.VpcInstance{
@@ -209,7 +235,7 @@ func convertAWSVPCToFern(awsVPC ec2types.Vpc, region string) (*vpcfern.VpcInstan
 			Name:   name,
 		},
 		Configuration: &vpcfern.VpcConfigurationInfo{
-			CreationCidrBlock: awsVPC.CidrBlock,
+			CreationCidrBlock: creationCIDR,
 			DhcpOptionsId:     awsVPC.DhcpOptionsId,
 			InstanceTenancy:   tenancy,
 			IsDefault:         awsVPC.IsDefault,
@@ -229,6 +255,9 @@ func convertAWSVPCToFern(awsVPC ec2types.Vpc, region string) (*vpcfern.VpcInstan
 // convertAWSSubnetToFern converts an AWS Subnet to a Fern Subnet
 func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.Subnet, []string) {
 	errors := []string{}
+	if !hasValue(awsSubnet.SubnetId) || strings.TrimSpace(region) == "" {
+		return nil, []string{fmt.Sprintf("Cannot identify subnet: missing subnet ID or region (id=%q, region=%q)", aws.ToString(awsSubnet.SubnetId), region)}
+	}
 	// Convert AWS Subnet tags to Fern tags and extract name
 	var tags []*common.Tag
 	var name *string
@@ -246,7 +275,7 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 	// Convert subnet state
 	var state *vpcfern.SubnetState
 	if awsSubnet.State != "" {
-		if s, err := vpcfern.NewSubnetStateFromString(strings.ToUpper(string(awsSubnet.State))); err == nil {
+		if s, err := vpcfern.NewSubnetStateFromString(strings.ToUpper(strings.ReplaceAll(string(awsSubnet.State), "-", "_"))); err == nil {
 			state = &s
 		} else {
 			errors = append(errors, err.Error())
@@ -288,9 +317,13 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 	// Create AvailabilityZone object from AWS data
 	var availabilityZone *vpcfern.AvailabilityZone
 	if awsSubnet.AvailabilityZone != nil || awsSubnet.AvailabilityZoneId != nil {
-		availabilityZone = &vpcfern.AvailabilityZone{
-			ZoneName: awsSubnet.AvailabilityZone,
-			ZoneId:   awsSubnet.AvailabilityZoneId,
+		if hasValue(awsSubnet.AvailabilityZoneId) {
+			availabilityZone = &vpcfern.AvailabilityZone{
+				ZoneName: awsSubnet.AvailabilityZone,
+				ZoneId:   *awsSubnet.AvailabilityZoneId,
+			}
+		} else {
+			errors = append(errors, fmt.Sprintf("Subnet %s in %s availability zone has no zone ID", *awsSubnet.SubnetId, region))
 		}
 	}
 
@@ -298,10 +331,20 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 	var subnetCidrAssociations []*vpcfern.VpcCidrBlockAssociation
 
 	for _, assoc := range awsSubnet.Ipv6CidrBlockAssociationSet {
-		subnetCidrAssociations = append(subnetCidrAssociations, &vpcfern.VpcCidrBlockAssociation{
-			AssociationId: aws.ToString(assoc.AssociationId),
-			CidrBlock:     aws.ToString(assoc.Ipv6CidrBlock),
-		})
+		var associationState string
+		if assoc.Ipv6CidrBlockState != nil {
+			associationState = string(assoc.Ipv6CidrBlockState.State)
+		}
+		converted, err := convertCIDRAssociation(assoc.AssociationId, assoc.Ipv6CidrBlock, associationState, true)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("Subnet %s in %s IPv6 association: %v", *awsSubnet.SubnetId, region, err))
+			continue
+		}
+		subnetCidrAssociations = append(subnetCidrAssociations, converted)
+	}
+	cidr, err := validatedCIDR(awsSubnet.CidrBlock, false)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Subnet %s in %s primary CIDR: %v", *awsSubnet.SubnetId, region, err))
 	}
 
 	subnet := &vpcfern.Subnet{
@@ -329,10 +372,42 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 			Tags:                          tags,
 		},
 		Resources: &vpcfern.SubnetResourceInfo{
-			CidrBlock:               awsSubnet.CidrBlock,
+			CidrBlock:               cidr,
 			CidrBlockAssociationSet: subnetCidrAssociations,
 		},
 	}
 
 	return subnet, errors
+}
+
+func hasValue(value *string) bool {
+	return value != nil && strings.TrimSpace(*value) != ""
+}
+
+func validatedCIDR(value *string, ipv6 bool) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	prefix, err := netip.ParsePrefix(*value)
+	if err != nil || prefix.Addr().Is6() != ipv6 || prefix.Addr().Is4In6() {
+		return nil, fmt.Errorf("invalid CIDR %q (IPv6=%t)", *value, ipv6)
+	}
+	return value, nil
+}
+
+func convertCIDRAssociation(id, cidr *string, state string, ipv6 bool) (*vpcfern.VpcCidrBlockAssociation, error) {
+	if !hasValue(id) {
+		return nil, fmt.Errorf("missing association ID")
+	}
+	if !hasValue(cidr) {
+		return nil, fmt.Errorf("association %s has no CIDR", *id)
+	}
+	if _, err := validatedCIDR(cidr, ipv6); err != nil {
+		return nil, fmt.Errorf("association %s: %w", *id, err)
+	}
+	association := &vpcfern.VpcCidrBlockAssociation{AssociationId: *id, CidrBlock: *cidr}
+	if state != "" {
+		association.State = &state
+	}
+	return association, nil
 }
