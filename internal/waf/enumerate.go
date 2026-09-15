@@ -11,6 +11,7 @@ import (
 	waffern "github.com/Method-Security/methodaws/generated/go/waf"
 	methodawsutils "github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2/types"
 	"github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -108,6 +109,9 @@ func enumerateWAFForScope(
 	awsScope types.Scope,
 	fernScope waffern.ScopeType,
 ) ([]*waffern.WafInstance, []string) {
+	if strings.TrimSpace(region) == "" {
+		return nil, []string{"Cannot enumerate WAFs without a region"}
+	}
 	log := svc1log.FromContext(ctx)
 	var errors []string
 
@@ -141,20 +145,16 @@ func enumerateWAFForScope(
 
 	var wafs []*waffern.WafInstance
 	for _, webACL := range allWebACLs {
-		// check if WAF has an ID
-		if webACL.ARN == nil {
-			log.Warn("WAF WebACL ARN is nil", svc1log.SafeParam("webACL", webACL))
-			errors = append(errors, "WAF WebACL ARN is nil")
+		webACLARN, err := validateWebACLIdentity(webACL, region, awsScope)
+		if err != nil {
+			errors = append(errors, err.Error())
 			continue
 		}
 
 		// Get the rules for the WAF
 		rules, defaultAction, errs := getRules(ctx, wafClient, awsScope, webACL.Id, webACL.Name)
-		if len(errs) != 0 {
-			errors = append(errors, errs...)
-		}
-		if defaultAction == nil {
-			continue
+		for _, err := range errs {
+			errors = append(errors, fmt.Sprintf("WebACL %s: %s", webACLARN.String(), err))
 		}
 
 		// Get the resources for the WAF
@@ -165,7 +165,11 @@ func enumerateWAFForScope(
 		if awsScope == types.ScopeRegional {
 			resourceArns, resourceErrors := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
 			errors = append(errors, resourceErrors...)
-			resourceInfo.LoadBalancers, resourceInfo.ApiGateways = referencesFromResourceARNs(resourceArns, region)
+			var referenceErrors []string
+			resourceInfo.LoadBalancers, resourceInfo.ApiGatewayStages, referenceErrors = referencesFromResourceARNs(resourceArns, webACLARN)
+			for _, err := range referenceErrors {
+				errors = append(errors, fmt.Sprintf("WebACL %s: %s", webACLARN.String(), err))
+			}
 		}
 
 		waf := waffern.WafInstance{
@@ -190,28 +194,27 @@ func enumerateWAFForScope(
 // getRules gets the rules for a given WebACL
 func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId, webACLName *string) ([]*waffern.RuleInfo, *waffern.ActionType, []string) {
 	log := svc1log.FromContext(ctx)
+	if !hasValue(webACLId) || !hasValue(webACLName) {
+		return nil, nil, []string{"Cannot call GetWebACL without its ID and name"}
+	}
 	getWebACLInput := &wafv2.GetWebACLInput{Id: webACLId, Name: webACLName, Scope: scope}
 	webACLOutput, err := wafClient.GetWebACL(ctx, getWebACLInput)
 	if err != nil {
-		return nil, nil, []string{err.Error()}
+		return nil, nil, []string{"GetWebACL: " + err.Error()}
 	}
 	if webACLOutput == nil || webACLOutput.WebACL == nil {
 		return nil, nil, []string{"GetWebACL returned no WebACL"}
 	}
 
-	// Default Action
-	defaultAction := webACLOutput.WebACL.DefaultAction
-	if defaultAction == nil {
-		return nil, nil, []string{"no default action specified"}
-	}
-	defaultActionType := getDefaultActionType(defaultAction)
-
 	var rules []*waffern.RuleInfo
 	var errors []string
+	defaultActionType, err := getDefaultActionType(webACLOutput.WebACL.DefaultAction)
+	if err != nil {
+		errors = append(errors, err.Error())
+	}
 	for _, rule := range webACLOutput.WebACL.Rules {
-		if rule.Name == nil {
-			log.Warn("WAF Rule Name is nil", svc1log.SafeParam("rule", rule))
-			errors = append(errors, "WAF Rule Name is nil")
+		if !hasValue(rule.Name) {
+			errors = append(errors, "WAF rule has no name")
 			continue
 		}
 		if rule.Statement == nil {
@@ -266,7 +269,7 @@ func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId
 		rules = append(rules, &ruleInfo)
 	}
 
-	return rules, &defaultActionType, errors
+	return rules, defaultActionType, errors
 }
 
 // getActionType gets the action type for a given RuleAction
@@ -288,15 +291,15 @@ func getActionType(action *types.RuleAction) waffern.ActionType {
 }
 
 // getDefaultActionType gets the default action type for a given DefaultAction
-func getDefaultActionType(action *types.DefaultAction) waffern.ActionType {
-	switch {
-	case action.Allow != nil:
-		return waffern.ActionTypeAllow
-	case action.Block != nil:
-		return waffern.ActionTypeBlock
-	default:
-		return waffern.ActionTypeOther
+func getDefaultActionType(action *types.DefaultAction) (*waffern.ActionType, error) {
+	if action == nil || (action.Allow == nil) == (action.Block == nil) {
+		return nil, fmt.Errorf("WebACL default action is missing or invalid")
 	}
+	value := waffern.ActionTypeBlock
+	if action.Allow != nil {
+		value = waffern.ActionTypeAllow
+	}
+	return &value, nil
 }
 
 // getStatementType gets the statement type for a given Statement
@@ -356,48 +359,75 @@ func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string
 				svc1log.SafeParam("resourceType", resourceType),
 				svc1log.SafeParam("region", region),
 				svc1log.Stacktrace(err))
-			errors = append(errors, err.Error())
+			errors = append(errors, fmt.Sprintf("ListResourcesForWebACL %s (%s, %s): %v", aws.ToString(webACLArn), region, resourceType, err))
 			continue
 		}
-		if output != nil {
-			resourceARNs = append(resourceARNs, output.ResourceArns...)
+		if output == nil {
+			errors = append(errors, fmt.Sprintf("ListResourcesForWebACL %s (%s, %s) returned no response", aws.ToString(webACLArn), region, resourceType))
+			continue
 		}
+		resourceARNs = append(resourceARNs, output.ResourceArns...)
 	}
 	return resourceARNs, errors
 }
 
 func referencesFromResourceARNs(
 	resourceARNs []string,
-	region string,
-) ([]*common.LoadBalancerReference, []*common.ApiGatewayReference) {
+	webACLARN arn.ARN,
+) ([]*common.LoadBalancerReference, []*waffern.ApiGatewayStageAssociation, []string) {
 	var loadBalancers []*common.LoadBalancerReference
-	var apiGateways []*common.ApiGatewayReference
+	var stages []*waffern.ApiGatewayStageAssociation
+	var errors []string
 	for _, resourceARN := range resourceARNs {
-		if strings.Contains(resourceARN, ":elasticloadbalancing:") &&
-			strings.Contains(resourceARN, ":loadbalancer/app/") {
+		parsed, err := arn.Parse(resourceARN)
+		if err != nil || parsed.Partition != webACLARN.Partition || parsed.Region != webACLARN.Region {
+			errors = append(errors, fmt.Sprintf("Invalid or out-of-scope associated resource ARN %q", resourceARN))
+			continue
+		}
+		parts := strings.Split(parsed.Resource, "/")
+		if parsed.Service == "elasticloadbalancing" && hasValue(&parsed.AccountID) &&
+			len(parts) == 4 && parts[0] == "loadbalancer" && parts[1] == "app" && hasValue(&parts[2]) && hasValue(&parts[3]) {
 			loadBalancers = append(loadBalancers, &common.LoadBalancerReference{
 				Arn:    resourceARN,
-				Region: region,
+				Region: parsed.Region,
 				Type:   common.LoadBalancerTypeApplication,
 			})
+			continue
 		}
-		if strings.Contains(resourceARN, ":apigateway:") && strings.Contains(resourceARN, "/restapis/") {
-			apiID := extractAPIGatewayIDFromArn(resourceARN)
-			if apiID != "" {
-				apiGateways = append(apiGateways, &common.ApiGatewayReference{Arn: resourceARN, ApiId: &apiID, Region: region})
-			}
+		if parsed.Service == "apigateway" && parsed.AccountID == "" && len(parts) == 5 &&
+			parts[0] == "" && parts[1] == "restapis" && hasValue(&parts[2]) && parts[3] == "stages" && hasValue(&parts[4]) {
+			apiID := parts[2]
+			parsed.Resource = "/restapis/" + apiID
+			stages = append(stages, &waffern.ApiGatewayStageAssociation{
+				StageArn:  resourceARN,
+				StageName: parts[4],
+				Api:       &common.ApiGatewayReference{Arn: parsed.String(), ApiId: &apiID, Region: parsed.Region},
+			})
+			continue
 		}
+		errors = append(errors, fmt.Sprintf("Invalid or unsupported associated resource ARN %q", resourceARN))
 	}
-	return loadBalancers, apiGateways
+	return loadBalancers, stages, errors
 }
 
-func extractAPIGatewayIDFromArn(arn string) string {
-	// Format: arn:aws:apigateway:region::/restapis/api-id
-	parts := strings.Split(arn, "/")
-	for index, part := range parts {
-		if part == "restapis" && index+1 < len(parts) {
-			return parts[index+1]
-		}
+func hasValue(value *string) bool {
+	return value != nil && strings.TrimSpace(*value) != ""
+}
+
+func validateWebACLIdentity(webACL types.WebACLSummary, region string, scope types.Scope) (arn.ARN, error) {
+	parsed, err := arn.Parse(aws.ToString(webACL.ARN))
+	parts := strings.Split(parsed.Resource, "/")
+	resourceScope := "regional"
+	if scope == types.ScopeCloudfront {
+		resourceScope = "global"
 	}
-	return ""
+	if err != nil || parsed.Service != "wafv2" || !hasValue(&parsed.Partition) || !hasValue(&parsed.AccountID) ||
+		parsed.Region != region || len(parts) != 4 || parts[0] != resourceScope || parts[1] != "webacl" ||
+		!hasValue(&parts[2]) || !hasValue(&parts[3]) {
+		return arn.ARN{}, fmt.Errorf("Invalid WebACL ARN %q for region %s and scope %s", aws.ToString(webACL.ARN), region, scope)
+	}
+	if (hasValue(webACL.Name) && *webACL.Name != parts[2]) || (hasValue(webACL.Id) && *webACL.Id != parts[3]) {
+		return arn.ARN{}, fmt.Errorf("WebACL ARN %q does not match its reported name or ID", *webACL.ARN)
+	}
+	return parsed, nil
 }

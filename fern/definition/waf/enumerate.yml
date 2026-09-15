@@ -73,9 +73,14 @@ types:
       scope: ScopeType
       description: optional<string>
       defaultAction: optional<ActionType>
+  ApiGatewayStageAssociation:
+    properties:
+      stageArn: string
+      stageName: string
+      api: common.ApiGatewayReference
   WafResourceInfo:
     properties:
-      apiGateways: optional<list<common.ApiGatewayReference>>
+      apiGatewayStages: optional<list<ApiGatewayStageAssociation>>
       loadBalancers: optional<list<common.LoadBalancerReference>>
       rules: optional<list<RuleInfo>>
 # Main WAF structs
