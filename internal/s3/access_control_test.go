@@ -150,6 +150,36 @@ func TestEvaluateS3AccessAppliesPolicyDenyToACLGrant(t *testing.T) {
 	assert.Equal(t, boolPointer(false), accessControl.AllowPublicRead)
 }
 
+func TestEvaluateS3AccessDoesNotApplyObjectDenyToBucketWideACLWrite(t *testing.T) {
+	t.Parallel()
+
+	denySingleObject := `{
+		"Statement": [{
+			"Effect": "Deny",
+			"Principal": "*",
+			"Action": ["s3:PutObject", "s3:DeleteObject"],
+			"Resource": "arn:aws:s3:::example-bucket/object"
+		}]
+	}`
+	accessControl, err := evaluateS3Access(accessEvaluationInput{
+		bucketARN: testBucketARN,
+		grants: []types.Grant{
+			aclGrant(allUsersGroup, types.PermissionWrite),
+			aclGrant(logDeliveryGroup, types.PermissionWrite),
+		},
+		aclKnown:                 true,
+		policyDocument:           &denySingleObject,
+		policyKnown:              true,
+		bucketPublicAccessBlock:  knownPublicAccessBlock(false, false, false, false),
+		accountPublicAccessBlock: knownPublicAccessBlock(false, false, false, false),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, accessControl)
+	assert.Equal(t, boolPointer(true), accessControl.AllowPublicWrite)
+	assert.Equal(t, boolPointer(true), accessControl.AllowLogDeliveryWrite)
+}
+
 func TestEvaluateS3AccessRecognizesDenyOutsideTrustedOrganization(t *testing.T) {
 	t.Parallel()
 

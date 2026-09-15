@@ -72,6 +72,7 @@ type policyStatement struct {
 type policyOperation struct {
 	action                 string
 	resource               string
+	resourceIsScope        bool
 	allowedResourcePattern string
 }
 
@@ -104,10 +105,10 @@ var aclReadOperations = []func(string) policyOperation{
 
 var aclWriteOperations = []func(string) policyOperation{
 	func(bucketARN string) policyOperation {
-		return policyOperation{action: "s3:PutObject", resource: bucketARN + "/object"}
+		return policyOperation{action: "s3:PutObject", resource: bucketARN + "/*", resourceIsScope: true}
 	},
 	func(bucketARN string) policyOperation {
-		return policyOperation{action: "s3:DeleteObject", resource: bucketARN + "/object"}
+		return policyOperation{action: "s3:DeleteObject", resource: bucketARN + "/*", resourceIsScope: true}
 	},
 }
 
@@ -199,6 +200,9 @@ func evaluatePolicyOperationDeny(statements []policyStatement, operation policyO
 		principal := statementPublicPrincipal(statement)
 		action := valuesMatch(statement.Action, statement.NotAction, operation.action, true)
 		resource := valuesMatch(statement.Resource, statement.NotResource, operation.resource, false)
+		if operation.resourceIsScope {
+			resource = valuesCoverResourceScope(statement.Resource, statement.NotResource, operation.resource)
+		}
 		if principal == matchNo || action == matchNo || resource == matchNo {
 			continue
 		}
@@ -220,6 +224,29 @@ func evaluatePolicyOperationDeny(statements []policyStatement, operation policyO
 		return nil
 	}
 	return boolPointer(false)
+}
+
+func valuesCoverResourceScope(values, excludedValues []string, resourceScope string) matchResult {
+	if len(excludedValues) > 0 || len(values) == 0 {
+		return matchUnknown
+	}
+
+	unknown := false
+	probe := strings.TrimSuffix(resourceScope, "*") + "method-public-probe"
+	for _, value := range values {
+		if value == "*" || value == resourceScope {
+			return matchYes
+		}
+		if strings.ContainsAny(value, "*?") || strings.Contains(value, "${") {
+			if policyVariablePatternCouldMatch(value, probe, false) || wildcardMatch(value, probe, false) {
+				unknown = true
+			}
+		}
+	}
+	if unknown {
+		return matchUnknown
+	}
+	return matchNo
 }
 
 func evaluatePolicyCapability(
