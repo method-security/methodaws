@@ -54,7 +54,6 @@ func TestListenerRetainsDefaultCertificateWhenCertificateListingFails(t *testing
 			ListenerArn: aws.String("listener"),
 			Certificates: []elbv2types.Certificate{{
 				CertificateArn: aws.String("default-certificate"),
-				IsDefault:      aws.Bool(true),
 			}}},
 		}},
 		certificateErr: errors.New("certificate listing denied"),
@@ -62,7 +61,8 @@ func TestListenerRetainsDefaultCertificateWhenCertificateListingFails(t *testing
 
 	listeners, errs := listenersForLoadBalancerV2(context.Background(), client, aws.String("load-balancer"))
 
-	require.Equal(t, []string{"certificate listing denied"}, errs)
+	require.Len(t, errs, 1)
+	require.Contains(t, errs[0], "certificate listing denied")
 	require.Len(t, listeners, 1)
 	require.Len(t, listeners[0].Certificates, 1)
 	assert.Equal(t, "default-certificate", listeners[0].Certificates[0].Arn)
@@ -153,7 +153,7 @@ func TestTargetPortRemainsUnsetWhenAWSOmitsIt(t *testing.T) {
 		TargetType:     elbv2types.TargetTypeEnumInstance,
 	})
 
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "target without an ID")
 	require.Len(t, targets, 1)
 	assert.Nil(t, targets[0].Port)
 }
@@ -172,7 +172,8 @@ func TestTargetGroupIsRetainedWhenTargetHealthIsUnavailable(t *testing.T) {
 
 	targetGroups, errs := targetGroupForLoadBalancerV2(context.Background(), client, &lbARN, "us-east-1")
 
-	require.Equal(t, []string{"target health denied"}, errs)
+	require.Len(t, errs, 1)
+	require.Contains(t, errs[0], "target health denied")
 	require.Len(t, targetGroups, 1)
 	assert.Equal(t,
 		"arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/example/id",

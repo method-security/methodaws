@@ -2,6 +2,7 @@ package loadbalancer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -75,15 +76,15 @@ func enumerateV2LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 		}
 
 		for _, lb := range page.LoadBalancers {
-			if lb.LoadBalancerArn == nil {
-				log.Warn("LoadBalancer name is nil for load balancer", svc1log.SafeParam("loadBalancer", lb))
-				errorMessages = append(errorMessages, "LoadBalancer name is nil")
+			if aws.ToString(lb.LoadBalancerArn) == "" || region == "" {
+				log.Warn("Load balancer ARN or region is empty", svc1log.SafeParam("loadBalancer", lb))
+				errorMessages = append(errorMessages, fmt.Sprintf("Load balancer %q in region %q has no required ARN or region", aws.ToString(lb.LoadBalancerName), region))
 				continue
 			}
 
 			// Create identification info
 			identification := &loadbalancerfern.LoadBalancerIdentificationInfo{
-				Arn:    lb.LoadBalancerArn,
+				Arn:    *lb.LoadBalancerArn,
 				Name:   lb.LoadBalancerName,
 				Region: region,
 			}
@@ -97,7 +98,7 @@ func enumerateV2LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 
 			// Convert LoadBalancerType from AWS SDK
 			if lbType, err := convertAWSLoadBalancerType(lb.Type); err == nil {
-				configuration.LoadBalancerType = lbType
+				configuration.LoadBalancerType = &lbType
 			} else {
 				errorMessages = append(errorMessages, fmt.Sprintf("Failed to convert load balancer type for %s in region %s: %s", aws.ToString(lb.LoadBalancerName), region, err.Error()))
 			}
@@ -122,13 +123,13 @@ func enumerateV2LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 
 			// Get listeners and target groups
 			listeners, errors := listenersForLoadBalancerV2(ctx, client, lb.LoadBalancerArn)
-			if len(errors) > 0 {
-				errorMessages = append(errorMessages, errors...)
+			for _, err := range errors {
+				errorMessages = append(errorMessages, fmt.Sprintf("Load balancer %s in region %s: %s", *lb.LoadBalancerArn, region, err))
 			}
 
 			targetGroups, errors := targetGroupForLoadBalancerV2(ctx, client, lb.LoadBalancerArn, region)
-			if len(errors) > 0 {
-				errorMessages = append(errorMessages, errors...)
+			for _, err := range errors {
+				errorMessages = append(errorMessages, fmt.Sprintf("Load balancer %s in region %s: %s", *lb.LoadBalancerArn, region, err))
 			}
 
 			// Create resource info with deduplicated references
@@ -180,9 +181,9 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 		}
 
 		for _, listener := range page.Listeners {
-			if listener.ListenerArn == nil {
-				errorMessages = append(errorMessages, "Listener ARN is nil")
-				log.Warn("Listener ARN is nil for listener", svc1log.SafeParam("listener", listener))
+			if aws.ToString(listener.ListenerArn) == "" {
+				errorMessages = append(errorMessages, "Listener ARN is empty")
+				log.Warn("Listener ARN is empty for listener", svc1log.SafeParam("listener", listener))
 				continue
 			}
 			var port *int
@@ -190,7 +191,10 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 				portValue := int(*listener.Port)
 				port = &portValue
 			}
-			certificates := certificatesFromListener(listener.Certificates)
+			certificates, certificateErrors := certificatesFromListener(listener.Certificates)
+			for _, err := range certificateErrors {
+				errorMessages = append(errorMessages, fmt.Sprintf("Listener %s: %s", *listener.ListenerArn, err))
+			}
 			if len(listener.Certificates) > 0 {
 				var errs []string
 				discoveredCertificates, errs := certificatesForListenerV2(ctx, client, listener.ListenerArn)
@@ -200,6 +204,7 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 				}
 			}
 			fernListener := &loadbalancerfern.Listener{
+				Id:           *listener.ListenerArn,
 				Arn:          listener.ListenerArn,
 				Port:         port,
 				Certificates: certificates,
@@ -220,18 +225,21 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 	return listeners, errorMessages
 }
 
-func certificatesFromListener(certificates []types.Certificate) []*loadbalancerfern.Certificate {
+func certificatesFromListener(certificates []types.Certificate) ([]*loadbalancerfern.Certificate, []string) {
 	result := make([]*loadbalancerfern.Certificate, 0, len(certificates))
+	var errs []string
 	for _, certificate := range certificates {
-		if certificate.CertificateArn == nil {
+		if aws.ToString(certificate.CertificateArn) == "" {
+			errs = append(errs, "Default certificate is missing its ARN")
 			continue
 		}
 		result = append(result, &loadbalancerfern.Certificate{
-			Arn:       *certificate.CertificateArn,
-			IsDefault: aws.ToBool(certificate.IsDefault),
+			Arn: *certificate.CertificateArn,
+			// DescribeListeners returns the default certificate but omits IsDefault.
+			IsDefault: true,
 		})
 	}
-	return result
+	return result, errs
 }
 
 func mergeCertificates(certificateGroups ...[]*loadbalancerfern.Certificate) []*loadbalancerfern.Certificate {
@@ -269,9 +277,9 @@ func targetGroupForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, 
 		}
 
 		for _, awsTargetGroup := range page.TargetGroups {
-			if awsTargetGroup.TargetGroupArn == nil {
-				log.Warn("Target group ARN is nil for target group", svc1log.SafeParam("targetGroup", awsTargetGroup))
-				errorMessages = append(errorMessages, "Target group ARN is nil")
+			if aws.ToString(awsTargetGroup.TargetGroupArn) == "" {
+				log.Warn("Target group ARN is empty for target group", svc1log.SafeParam("targetGroup", awsTargetGroup))
+				errorMessages = append(errorMessages, "Target group ARN is empty")
 				continue
 			}
 
@@ -312,7 +320,7 @@ func targetGroupForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, 
 			// Get targets
 			targets, err := targetsForTargetGroupV2(ctx, client, awsTargetGroup)
 			if err != nil {
-				errorMessages = append(errorMessages, err.Error())
+				errorMessages = append(errorMessages, fmt.Sprintf("Target group %s: %s", *awsTargetGroup.TargetGroupArn, err))
 			}
 
 			// Create TargetGroupInstance
@@ -347,6 +355,9 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 	if output == nil {
 		return targets, fmt.Errorf("DescribeTargetHealth returned no response")
 	}
+	if len(output.TargetHealthDescriptions) == 0 {
+		return targets, nil
+	}
 
 	// Convert target type once for all targets in this group
 	var targetType loadbalancerfern.TargetType
@@ -355,8 +366,10 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 	} else {
 		return targets, fmt.Errorf("failed to convert target type: %w", err)
 	}
+	var errs []error
 	for _, targetHealth := range output.TargetHealthDescriptions {
-		if targetHealth.Target == nil || targetHealth.Target.Id == nil {
+		if targetHealth.Target == nil || aws.ToString(targetHealth.Target.Id) == "" {
+			errs = append(errs, fmt.Errorf("target group %s has a target without an ID", aws.ToString(targetGroup.TargetGroupArn)))
 			continue
 		}
 		var availabilityZone *string = nil
@@ -365,7 +378,7 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 		}
 		target := &loadbalancerfern.Target{
 			Id:               aws.ToString(targetHealth.Target.Id),
-			Type:             &targetType,
+			Type:             targetType,
 			AvailabilityZone: availabilityZone,
 		}
 		if targetHealth.Target.Port != nil {
@@ -374,7 +387,7 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 		}
 		targets = append(targets, target)
 	}
-	return targets, nil
+	return targets, errors.Join(errs...)
 }
 
 func certificatesForListenerV2(ctx context.Context, client elbv2ResourceAPI, listenerARN *string) ([]*loadbalancerfern.Certificate, []string) {
@@ -387,10 +400,11 @@ func certificatesForListenerV2(ctx context.Context, client elbv2ResourceAPI, lis
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return certs, append(errors, err.Error())
+			return certs, append(errors, fmt.Sprintf("Listener %s certificates: %s", aws.ToString(listenerARN), err))
 		}
 		for _, cert := range page.Certificates {
-			if cert.CertificateArn == nil {
+			if aws.ToString(cert.CertificateArn) == "" {
+				errors = append(errors, fmt.Sprintf("Listener %s has a certificate without an ARN", aws.ToString(listenerARN)))
 				continue
 			}
 			certs = append(certs, &loadbalancerfern.Certificate{
@@ -404,13 +418,13 @@ func certificatesForListenerV2(ctx context.Context, client elbv2ResourceAPI, lis
 
 // Resource discovery helper functions with deduplication
 func createVpcReferenceFromLB(lb types.LoadBalancer, region string) *common.VpcReference {
-	if lb.VpcId == nil {
+	if aws.ToString(lb.VpcId) == "" {
 		return nil
 	}
 
 	var subnetIds []string
 	for _, az := range lb.AvailabilityZones {
-		if az.SubnetId != nil {
+		if aws.ToString(az.SubnetId) != "" {
 			subnetIds = append(subnetIds, *az.SubnetId)
 		}
 	}

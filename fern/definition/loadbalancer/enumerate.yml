@@ -38,9 +38,12 @@ types:
       - HTTPS
       - TCP
       - TLS
+      - SSL
       - UDP
       - TCP_UDP
       - GENEVE
+      - QUIC
+      - TCP_QUIC
   TargetGroupIpAddressType:
     enum:
       - IPV4
@@ -58,14 +61,17 @@ types:
       isDefault: boolean
   Listener:
     properties:
+      # V2 listener ARN, or Classic frontend port scoped to the enclosing load balancer ARN.
+      id: string
       arn: optional<string>
       protocol: optional<Protocol>
       port: optional<integer>
       certificates: optional<list<Certificate>>
   Target:
     properties:
+      # AWS target ID, interpreted using type and the enclosing load balancer/target-group scope.
       id: string
-      type: optional<TargetType>
+      type: TargetType
       port: optional<integer>
       availabilityZone: optional<string>
 # TargetGroup High level structs
@@ -81,6 +87,7 @@ types:
       protocol: optional<Protocol>
   TargetGroupResourceInfo:
     properties:
+      # Registered targets; not a guarantee of health or active forwarding.
       targets: optional<list<Target>>
 # TargetGroup Main Structs
   TargetGroupInstance:
@@ -92,12 +99,12 @@ types:
 # LoadBalancer High level structs
   LoadBalancerIdentificationInfo:
     properties:
-      arn: optional<string>
+      arn: string
       name: optional<string>
       region: string
   LoadBalancerConfigurationInfo:
     properties:
-      loadBalancerType: LoadBalancerType
+      loadBalancerType: optional<LoadBalancerType>
       dnsName: optional<string>
       createdTime: optional<datetime>
       hostedZoneId: optional<string>

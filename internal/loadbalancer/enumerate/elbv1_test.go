@@ -39,7 +39,7 @@ func TestClassicLoadBalancerUsesAuthoritativeARNAndOptionalListenerARN(t *testin
 	require.NoError(t, err)
 	assert.Equal(t,
 		"arn:aws-us-gov:elasticloadbalancing:us-gov-west-1:123456789012:loadbalancer/example",
-		aws.ToString(identification.Arn),
+		identification.Arn,
 	)
 
 	listeners, errs := listenersForLoadBalancerV1(loadBalancer)
