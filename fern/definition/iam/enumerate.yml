@@ -1,6 +1,3 @@
-imports:
-  common: ../common/resources.yml
-
 types:
 # Config
   IamEnumerateConfig:
@@ -37,8 +34,6 @@ types:
   IamRoleResourceInfo:
     properties:
       attachedPolicies: optional<list<AttachedPolicy>>
-      lambdaFunctions: optional<list<common.LambdaReference>>
-      ec2Instances: optional<list<common.Ec2InstanceReference>>
 # Main IAM Role Structs
   IamRoles:
     properties:
