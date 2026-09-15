@@ -25,8 +25,11 @@ types:
       region: string
   ExternalBucketConfigurationInfo:
     properties:
-      allowDirectoryListing: boolean
-      allowAnonymousRead: boolean
+      # Result of the anonymous listing probe; unset when inconclusive.
+      allowDirectoryListing: optional<boolean>
+      # True when a sampled object is anonymously readable; unset otherwise.
+      # A failed or unperformed sample does not establish bucket-wide privacy.
+      allowAnonymousRead: optional<boolean>
       policy: optional<string>
       acls: optional<list<enumerate.S3BucketAccessControl>>
       ownerID: optional<string>

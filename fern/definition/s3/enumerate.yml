@@ -81,16 +81,11 @@ types:
       mfaDelete: optional<S3MFADeleteStatus>
       encryptionRules: optional<list<EncryptionRule>>
       accessControl: optional<S3BucketAccessControl>
-  S3BucketResourceInfo:
-    properties:
-      iamRoles: optional<list<common.IamRoleReference>>
-      lambdaFunctions: optional<list<common.LambdaReference>>
 # Main S3 Bucket Structs
   S3Bucket:
     properties:
       identification: S3BucketIdentificationInfo
       configuration: S3BucketConfigurationInfo
-      resources: optional<S3BucketResourceInfo>
   S3EnumerateResult:
     properties:
       s3Buckets: optional<list<S3Bucket>>

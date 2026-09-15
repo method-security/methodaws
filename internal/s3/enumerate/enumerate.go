@@ -4,10 +4,8 @@ package enumerate
 import (
 	// Standard
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	// Generated
@@ -45,6 +43,7 @@ func bucketEncryption(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S
 		return bucket, fmt.Errorf("GetBucketEncryption returned no response for bucket %s", bucket.Identification.Name)
 	}
 
+	var conversionErrors []error
 	if result.ServerSideEncryptionConfiguration != nil {
 		encryptionRules := []*s3fern.EncryptionRule{}
 		for _, rule := range result.ServerSideEncryptionConfiguration.Rules {
@@ -52,8 +51,12 @@ func bucketEncryption(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S
 				continue
 			}
 			encryptionRule := s3fern.EncryptionRule{}
-			sseAlgorithm, _ := s3fern.NewS3ServerSideEncryptionFromString(string(rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm))
-			encryptionRule.SseAlgorithm = &sseAlgorithm
+			sseAlgorithm, err := s3fern.NewS3ServerSideEncryptionFromString(string(rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm))
+			if err != nil {
+				conversionErrors = append(conversionErrors, fmt.Errorf("bucket %s encryption: %w", bucket.Identification.Name, err))
+			} else {
+				encryptionRule.SseAlgorithm = &sseAlgorithm
+			}
 			if rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID != nil {
 				encryptionRule.KmsKey = kmsKeyReference(*rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID)
 			}
@@ -61,7 +64,7 @@ func bucketEncryption(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S
 		}
 		bucket.Configuration.EncryptionRules = encryptionRules
 	}
-	return bucket, nil
+	return bucket, errors.Join(conversionErrors...)
 }
 
 func kmsKeyReference(value string) *common.KmsKeyReference {
@@ -345,21 +348,20 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			},
 		}
 
-		// Get the bucket's region
-		regionOutput, err := client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{Bucket: bucket.Name})
-		if err != nil {
-			log.Warn("Failed to get bucket region",
-				svc1log.SafeParam("bucketName", *bucket.Name),
-				svc1log.Stacktrace(err))
-			errorMessages = append(errorMessages, fmt.Sprintf("Error getting location for bucket %s: %v", *bucket.Name, err))
-			continue
-		}
-		if regionOutput == nil {
-			errorMessages = append(errorMessages, fmt.Sprintf("GetBucketLocation returned no response for bucket %s", *bucket.Name))
-			continue
+		region := aws.ToString(bucket.BucketRegion)
+		if region == "" {
+			regionOutput, err := client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{Bucket: bucket.Name})
+			if err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("Error getting location for bucket %s: %v", *bucket.Name, err))
+				continue
+			}
+			if regionOutput == nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("GetBucketLocation returned no response for bucket %s", *bucket.Name))
+				continue
+			}
+			region = normalizeBucketRegion(regionOutput.LocationConstraint)
 		}
 
-		region := normalizeBucketRegion(regionOutput.LocationConstraint)
 		s3Bucket.Identification.Region = region
 		bucketARN, err := methodawsutils.BuildGlobalARNForRegion(region, "s3", "", s3Bucket.Identification.Name)
 		if err != nil {
@@ -378,6 +380,9 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			s3Bucket.Identification.Region,
 			dnsSuffix,
 		)
+		if strings.ContainsAny(*bucket.Name, "._") || *bucket.Name != strings.ToLower(*bucket.Name) {
+			s3Bucket.Identification.Url = fmt.Sprintf("https://s3.%s.%s/%s", region, dnsSuffix, *bucket.Name)
+		}
 
 		// Group buckets by region
 		bucketsByRegion[region] = append(bucketsByRegion[region], s3Bucket)
@@ -432,9 +437,6 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			if err != nil {
 				errorMessages = append(errorMessages, err.Error())
 			}
-
-			// Add resource discovery
-			bucketPtr.Resources = discoverS3Resources(bucketPtr)
 
 			s3Buckets = append(s3Buckets, bucketPtr)
 		}
@@ -494,124 +496,4 @@ func normalizeBucketRegion(location types.BucketLocationConstraint) string {
 	default:
 		return string(location)
 	}
-}
-
-// Resource discovery functions with deduplication
-func discoverS3Resources(bucket *s3fern.S3Bucket) *s3fern.S3BucketResourceInfo {
-	resources := &s3fern.S3BucketResourceInfo{}
-
-	// KMS keys are now handled directly in EncryptionRules via KmsKey references
-
-	// Discover IAM roles and Lambda functions from bucket policy
-	if bucket.Configuration.Policy != nil {
-		if iamRoles := discoverIamRolesFromPolicy(*bucket.Configuration.Policy, bucket.Identification.Region); len(iamRoles) > 0 {
-			resources.IamRoles = iamRoles
-		}
-		if lambdaFunctions := discoverLambdaFromPolicy(*bucket.Configuration.Policy, bucket.Identification.Region); len(lambdaFunctions) > 0 {
-			resources.LambdaFunctions = lambdaFunctions
-		}
-	}
-
-	// Return nil if no resources were discovered
-	if resources.IamRoles == nil && resources.LambdaFunctions == nil {
-		return nil
-	}
-
-	return resources
-}
-
-func discoverIamRolesFromPolicy(policyDocument, region string) []*common.IamRoleReference {
-	iamMap := make(map[string]*common.IamRoleReference)
-	for _, parsedARN := range concretePolicyARNs(policyDocument) {
-		if parsedARN.Service != "iam" || !strings.HasPrefix(parsedARN.Resource, "role/") {
-			continue
-		}
-		rolePath := strings.TrimPrefix(parsedARN.Resource, "role/")
-		roleName := rolePath[strings.LastIndex(rolePath, "/")+1:]
-		if roleName == "" {
-			continue
-		}
-		arnValue := parsedARN.String()
-		if _, exists := iamMap[arnValue]; !exists {
-			iamMap[arnValue] = &common.IamRoleReference{
-				Arn:      arnValue,
-				RoleName: &roleName,
-				Region:   region, // IAM is global but we store the bucket's region for context
-			}
-		}
-	}
-
-	arns := sortedMapKeys(iamMap)
-	iamRoles := make([]*common.IamRoleReference, 0, len(arns))
-	for _, arnValue := range arns {
-		iamRoles = append(iamRoles, iamMap[arnValue])
-	}
-	return iamRoles
-}
-
-func discoverLambdaFromPolicy(policyDocument, _ string) []*common.LambdaReference {
-	lambdaMap := make(map[string]*common.LambdaReference)
-	for _, parsedARN := range concretePolicyARNs(policyDocument) {
-		resourceParts := strings.Split(parsedARN.Resource, ":")
-		if parsedARN.Service != "lambda" || len(resourceParts) < 2 || resourceParts[0] != "function" || resourceParts[1] == "" {
-			continue
-		}
-		functionName := resourceParts[1]
-		arnValue := parsedARN.String()
-		if _, exists := lambdaMap[arnValue]; !exists {
-			lambdaMap[arnValue] = &common.LambdaReference{
-				Arn:          arnValue,
-				FunctionName: &functionName,
-				Region:       parsedARN.Region,
-			}
-		}
-	}
-
-	arns := sortedMapKeys(lambdaMap)
-	lambdaFunctions := make([]*common.LambdaReference, 0, len(arns))
-	for _, arnValue := range arns {
-		lambdaFunctions = append(lambdaFunctions, lambdaMap[arnValue])
-	}
-	return lambdaFunctions
-}
-
-func concretePolicyARNs(policyDocument string) []arn.ARN {
-	var document any
-	if err := json.Unmarshal([]byte(policyDocument), &document); err != nil {
-		return nil
-	}
-
-	var parsedARNs []arn.ARN
-	var visit func(any)
-	visit = func(value any) {
-		switch typedValue := value.(type) {
-		case map[string]any:
-			for _, child := range typedValue {
-				visit(child)
-			}
-		case []any:
-			for _, child := range typedValue {
-				visit(child)
-			}
-		case string:
-			if strings.ContainsAny(typedValue, "*?$") {
-				return
-			}
-			parsedARN, err := arn.Parse(typedValue)
-			if err == nil {
-				parsedARNs = append(parsedARNs, parsedARN)
-			}
-		}
-	}
-	visit(document)
-	return parsedARNs
-}
-
-func sortedMapKeys[T any](values map[string]T) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

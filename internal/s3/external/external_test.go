@@ -56,7 +56,7 @@ func TestLocateBucketUsesRegionFromAccessDeniedResponse(t *testing.T) {
 	assert.Equal(t, "ap-southeast-2", region)
 }
 
-func TestLocateBucketUsesProbeRegionForAccessDeniedWithoutRegionHeader(t *testing.T) {
+func TestLocateBucketRejectsAccessDeniedWithoutRegionHeader(t *testing.T) {
 	t.Parallel()
 
 	exists, region, err := locateBucketWithClient(context.Background(), &stubHeadBucketClient{
@@ -66,9 +66,9 @@ func TestLocateBucketUsesProbeRegionForAccessDeniedWithoutRegionHeader(t *testin
 		},
 	}, "us-gov-west-1", "example-bucket")
 
-	require.NoError(t, err)
-	assert.True(t, exists)
-	assert.Equal(t, "us-gov-west-1", region)
+	require.Error(t, err)
+	assert.False(t, exists)
+	assert.Empty(t, region)
 }
 
 func TestLocateBucketTreatsNotFoundAsAbsent(t *testing.T) {
