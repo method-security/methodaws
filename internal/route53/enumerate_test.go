@@ -1,6 +1,7 @@
 package route53
 
 import (
+	"encoding/json"
 	"testing"
 
 	route53fern "github.com/Method-Security/methodaws/generated/go/route53"
@@ -34,7 +35,10 @@ func TestResourceInfoDoesNotInferARNsFromDNSTargets(t *testing.T) {
 
 	require.NotNil(t, resources)
 	assert.Equal(t, records, resources.RecordSets)
-	assert.Nil(t, resources.CloudFrontDistributions)
-	assert.Nil(t, resources.LoadBalancers)
-	assert.Nil(t, resources.S3Buckets)
+	data, err := json.Marshal(resources)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &fields))
+	assert.Len(t, fields, 1)
+	assert.Contains(t, fields, "recordSets")
 }
