@@ -4,10 +4,12 @@ package waf
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	waffern "github.com/Method-Security/methodaws/generated/go/waf"
+	methodawsutils "github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2/types"
@@ -47,17 +49,19 @@ func EnumerateWAF(ctx context.Context, awsConfig aws.Config, config waffern.WafE
 			svc1log.SafeParam("wafCount", len(wafs)))
 	}
 
-	cloudFrontConfig := awsConfig.Copy()
-	cloudFrontConfig.Region = "us-east-1"
-	cloudFrontWAFs, cloudFrontErrors := enumerateWAFForScope(
-		ctx,
-		wafv2.NewFromConfig(cloudFrontConfig),
-		"us-east-1",
-		types.ScopeCloudfront,
-		waffern.ScopeTypeCloudfront,
-	)
-	allErrors = append(allErrors, cloudFrontErrors...)
-	allWafs = append(allWafs, cloudFrontWAFs...)
+	if cloudFrontRegion, ok := cloudFrontWAFRegion(awsConfig.Region, config.Regions); ok {
+		cloudFrontConfig := awsConfig.Copy()
+		cloudFrontConfig.Region = cloudFrontRegion
+		cloudFrontWAFs, cloudFrontErrors := enumerateWAFForScope(
+			ctx,
+			wafv2.NewFromConfig(cloudFrontConfig),
+			cloudFrontRegion,
+			types.ScopeCloudfront,
+			waffern.ScopeTypeCloudfront,
+		)
+		allErrors = append(allErrors, cloudFrontErrors...)
+		allWafs = append(allWafs, cloudFrontWAFs...)
+	}
 
 	// Set the results
 	if len(allWafs) > 0 {
@@ -65,6 +69,18 @@ func EnumerateWAF(ctx context.Context, awsConfig aws.Config, config waffern.WafE
 	}
 	report.Errors = allErrors
 	return report
+}
+
+func cloudFrontWAFRegion(configRegion string, regions []string) (string, bool) {
+	region := configRegion
+	if len(regions) > 0 {
+		region = regions[0]
+	}
+	isCommercial, err := methodawsutils.IsCommercialAWSRegion(region)
+	if err != nil || !isCommercial {
+		return "", false
+	}
+	return "us-east-1", true
 }
 
 // enumerateWAFForRegion enumerates WAFs for a given region
@@ -136,6 +152,8 @@ func enumerateWAFForScope(
 		rules, defaultAction, errs := getRules(ctx, wafClient, awsScope, webACL.Id, webACL.Name)
 		if len(errs) != 0 {
 			errors = append(errors, errs...)
+		}
+		if defaultAction == nil {
 			continue
 		}
 
@@ -145,12 +163,9 @@ func enumerateWAFForScope(
 		}
 
 		if awsScope == types.ScopeRegional {
-			resourceArns, err := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
-			if err != nil {
-				errors = append(errors, err.Error())
-			} else {
-				resourceInfo.LoadBalancer, resourceInfo.ApiGateway = referencesFromResourceARNs(resourceArns, region)
-			}
+			resourceArns, resourceErrors := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
+			errors = append(errors, resourceErrors...)
+			resourceInfo.LoadBalancers, resourceInfo.ApiGateways = referencesFromResourceARNs(resourceArns, region)
 		}
 
 		waf := waffern.WafInstance{
@@ -197,6 +212,11 @@ func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId
 		if rule.Name == nil {
 			log.Warn("WAF Rule Name is nil", svc1log.SafeParam("rule", rule))
 			errors = append(errors, "WAF Rule Name is nil")
+			continue
+		}
+		if rule.Statement == nil {
+			log.Warn("WAF Rule Statement is nil", svc1log.SafeParam("ruleName", *rule.Name))
+			errors = append(errors, fmt.Sprintf("WAF Rule %s Statement is nil", *rule.Name))
 			continue
 		}
 		ruleJSON, err := json.Marshal(rule)
@@ -317,13 +337,14 @@ func getStatementType(statement *types.Statement) waffern.StatementType {
 	}
 }
 
-func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string, region string) ([]string, error) {
+func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string, region string) ([]string, []string) {
 	log := svc1log.FromContext(ctx)
 	resourceTypes := []types.ResourceType{
 		types.ResourceTypeApplicationLoadBalancer,
 		types.ResourceTypeApiGateway,
 	}
 	var resourceARNs []string
+	var errors []string
 	for _, resourceType := range resourceTypes {
 		output, err := wafClient.ListResourcesForWebACL(ctx, &wafv2.ListResourcesForWebACLInput{
 			WebACLArn:    webACLArn,
@@ -335,35 +356,39 @@ func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string
 				svc1log.SafeParam("resourceType", resourceType),
 				svc1log.SafeParam("region", region),
 				svc1log.Stacktrace(err))
-			return resourceARNs, err
+			errors = append(errors, err.Error())
+			continue
 		}
 		if output != nil {
 			resourceARNs = append(resourceARNs, output.ResourceArns...)
 		}
 	}
-	return resourceARNs, nil
+	return resourceARNs, errors
 }
 
-func referencesFromResourceARNs(resourceARNs []string, region string) (*common.LoadBalancerReference, *common.ApiGatewayReference) {
-	var loadBalancer *common.LoadBalancerReference
-	var apiGateway *common.ApiGatewayReference
+func referencesFromResourceARNs(
+	resourceARNs []string,
+	region string,
+) ([]*common.LoadBalancerReference, []*common.ApiGatewayReference) {
+	var loadBalancers []*common.LoadBalancerReference
+	var apiGateways []*common.ApiGatewayReference
 	for _, resourceARN := range resourceARNs {
-		if loadBalancer == nil && strings.Contains(resourceARN, ":elasticloadbalancing:") &&
+		if strings.Contains(resourceARN, ":elasticloadbalancing:") &&
 			strings.Contains(resourceARN, ":loadbalancer/app/") {
-			loadBalancer = &common.LoadBalancerReference{
+			loadBalancers = append(loadBalancers, &common.LoadBalancerReference{
 				Arn:    resourceARN,
 				Region: region,
 				Type:   common.LoadBalancerTypeApplication,
-			}
+			})
 		}
-		if apiGateway == nil && strings.Contains(resourceARN, ":apigateway:") && strings.Contains(resourceARN, "/restapis/") {
+		if strings.Contains(resourceARN, ":apigateway:") && strings.Contains(resourceARN, "/restapis/") {
 			apiID := extractAPIGatewayIDFromArn(resourceARN)
 			if apiID != "" {
-				apiGateway = &common.ApiGatewayReference{Arn: resourceARN, ApiId: &apiID, Region: region}
+				apiGateways = append(apiGateways, &common.ApiGatewayReference{Arn: resourceARN, ApiId: &apiID, Region: region})
 			}
 		}
 	}
-	return loadBalancer, apiGateway
+	return loadBalancers, apiGateways
 }
 
 func extractAPIGatewayIDFromArn(arn string) string {

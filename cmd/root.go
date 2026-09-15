@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -27,12 +28,27 @@ import (
 // for use by subcommands. The output signal is used to write the output of the command to the desired output format
 // after the execution of the invoked commands Run function.
 type MethodAws struct {
-	Version      string
-	RootFlags    config.RootFlags
-	OutputConfig writer.OutputConfig
-	OutputSignal signal.Signal
-	AwsConfig    *aws.Config
-	RootCmd      *cobra.Command
+	Version       string
+	RootFlags     config.RootFlags
+	OutputConfig  writer.OutputConfig
+	OutputSignal  signal.Signal
+	AwsConfig     *aws.Config
+	RootCmd       *cobra.Command
+	outputWritten bool
+}
+
+const discoverRegionsAnnotation = "methodaws/discover-regions"
+
+func regionalCommand(command *cobra.Command) *cobra.Command {
+	if command.Annotations == nil {
+		command.Annotations = make(map[string]string)
+	}
+	command.Annotations[discoverRegionsAnnotation] = "true"
+	return command
+}
+
+func commandRequiresRegionDiscovery(command *cobra.Command) bool {
+	return command.Annotations[discoverRegionsAnnotation] == "true"
 }
 
 // NewMethodAws returns a new MethodAws struct with the provided version string. The MethodAws struct is used to
@@ -90,14 +106,12 @@ func (a *MethodAws) setupCommonConfig(cmd *cobra.Command, outputFormat string, o
 			return err
 		}
 		a.AwsConfig = &awsConfig
-		a.RootFlags.Regions, err = utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
-		if err != nil {
-			a.OutputSignal.Status = 1
-			a.OutputSignal.ErrorMessage = aws.String("Unable to discover enabled AWS regions")
-			return err
+		if commandRequiresRegionDiscovery(cmd) {
+			a.RootFlags.Regions, err = utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
+			if err != nil {
+				return fmt.Errorf("unable to discover enabled AWS regions: %w", err)
+			}
 		}
-	} else {
-		a.RootFlags.Regions = utils.GetRegionsToCheck(cmd.Context(), a.RootFlags.Regions)
 	}
 
 	return nil
@@ -114,25 +128,17 @@ func (a *MethodAws) InitRootCommand() {
 	var outputFormat string
 	var outputFile string
 	a.RootCmd = &cobra.Command{
-		Use:          "methodaws",
-		Short:        "Audit AWS resources",
-		Long:         "Audit AWS resources",
-		SilenceUsage: true,
+		Use:           "methodaws",
+		Short:         "Audit AWS resources",
+		Long:          "Audit AWS resources",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			// Use the variables directly - Cobra automatically updates them when flags are parsed
 			return a.setupCommonConfig(cmd, outputFormat, outputFile, true)
 		},
 		PersistentPostRunE: func(cmd *cobra.Command, _ []string) error {
-			completedAt := datetime.DateTime(time.Now())
-			a.OutputSignal.CompletedAt = &completedAt
-			return writer.Write(
-				a.OutputSignal.Content,
-				a.OutputConfig,
-				&a.OutputSignal.StartedAt,
-				a.OutputSignal.CompletedAt,
-				a.OutputSignal.Status,
-				a.OutputSignal.ErrorMessage,
-			)
+			return a.writeOutput()
 		},
 	}
 
@@ -159,6 +165,40 @@ func (a *MethodAws) InitRootCommand() {
 	}
 
 	a.RootCmd.AddCommand(versionCmd)
+}
+
+// Execute runs the configured command, ensures failures are serialized, and returns the process exit code.
+func (a *MethodAws) Execute() int {
+	err := a.RootCmd.Execute()
+	if err != nil {
+		a.OutputSignal.AddError(err)
+		if !a.outputWritten {
+			_ = a.writeOutput()
+		}
+		return 1
+	}
+	if a.OutputSignal.Status != 0 {
+		return a.OutputSignal.Status
+	}
+	return 0
+}
+
+func (a *MethodAws) writeOutput() error {
+	completedAt := datetime.DateTime(time.Now())
+	a.OutputSignal.CompletedAt = &completedAt
+	a.outputWritten = true
+	return writer.Write(
+		a.OutputSignal.Content,
+		a.OutputConfig,
+		&a.OutputSignal.StartedAt,
+		a.OutputSignal.CompletedAt,
+		a.OutputSignal.Status,
+		a.OutputSignal.ErrorMessage,
+	)
+}
+
+func (a *MethodAws) setReport(report any) {
+	a.OutputSignal.Content = report
 }
 
 // A utility function to validate that the provided output format is one of the supported formats: json, yaml, signal.

@@ -81,8 +81,15 @@ types:
     properties:
       uri: string
       vpcLinkId: string
-      loadBalancerArn: string
+      loadBalancerArn: optional<string>
+      loadBalancerArns: optional<list<string>>
+      listenerArn: optional<string>
       dnsName: optional<string>
+  ServiceDiscoveryBackend:
+    properties:
+      uri: string
+      vpcLinkId: string
+      serviceArn: string
   HttpBackend:
     properties:
       uri: string
@@ -101,7 +108,11 @@ types:
       backend: LambdaBackend
   VpcLinkIntegration:
     properties:
-      backend: LoadBalancerBackend
+      backend: VpcLinkBackend
+  VpcLinkBackend:
+    union:
+      load_balancer: LoadBalancerBackend
+      service_discovery: ServiceDiscoveryBackend
   HttpIntegration:
     properties:
       backend: HttpBackend
@@ -153,7 +164,7 @@ types:
     properties:
       version: ApiGatewayVersion
       description: optional<string>
-      stage: optional<string>
+      stages: optional<list<string>>
       accessLogSettings: optional<AccessLogSettings>
       corsConfiguration: optional<CorsConfiguration>
       clientCertificateId: optional<string>

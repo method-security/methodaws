@@ -31,7 +31,7 @@ func EnumerateLoadBalancers(ctx context.Context, awsConfig aws.Config, config lo
 			switch version {
 			case loadbalancerfern.LoadBalancerVersionV1:
 				log.Info("Processing v1 load balancers")
-				v1LBs, errors := enumerateV1LoadBalancersAllRegions(ctx, awsConfig, config.Regions)
+				v1LBs, errors := enumerateV1LoadBalancersAllRegions(ctx, awsConfig, config.Regions, config.AccountId)
 				allLoadBalancers = append(allLoadBalancers, v1LBs...)
 				allErrors = append(allErrors, errors...)
 

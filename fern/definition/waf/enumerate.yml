@@ -75,8 +75,8 @@ types:
       defaultAction: optional<ActionType>
   WafResourceInfo:
     properties:
-      apiGateway: optional<common.ApiGatewayReference>
-      loadBalancer: optional<common.LoadBalancerReference>
+      apiGateways: optional<list<common.ApiGatewayReference>>
+      loadBalancers: optional<list<common.LoadBalancerReference>>
       rules: optional<list<RuleInfo>>
 # Main WAF structs
   WafInstance:

@@ -190,16 +190,17 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 				portValue := int(*listener.Port)
 				port = &portValue
 			}
-			var certificates []*loadbalancerfern.Certificate
+			certificates := certificatesFromListener(listener.Certificates)
 			if len(listener.Certificates) > 0 {
 				var errs []string
-				certificates, errs = certificatesForListenerV2(ctx, client, listener.ListenerArn)
+				discoveredCertificates, errs := certificatesForListenerV2(ctx, client, listener.ListenerArn)
+				certificates = mergeCertificates(certificates, discoveredCertificates)
 				if len(errs) > 0 {
 					errorMessages = append(errorMessages, errs...)
 				}
 			}
 			fernListener := &loadbalancerfern.Listener{
-				Arn:          *listener.ListenerArn,
+				Arn:          listener.ListenerArn,
 				Port:         port,
 				Certificates: certificates,
 			}
@@ -217,6 +218,39 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 		}
 	}
 	return listeners, errorMessages
+}
+
+func certificatesFromListener(certificates []types.Certificate) []*loadbalancerfern.Certificate {
+	result := make([]*loadbalancerfern.Certificate, 0, len(certificates))
+	for _, certificate := range certificates {
+		if certificate.CertificateArn == nil {
+			continue
+		}
+		result = append(result, &loadbalancerfern.Certificate{
+			Arn:       *certificate.CertificateArn,
+			IsDefault: aws.ToBool(certificate.IsDefault),
+		})
+	}
+	return result
+}
+
+func mergeCertificates(certificateGroups ...[]*loadbalancerfern.Certificate) []*loadbalancerfern.Certificate {
+	var result []*loadbalancerfern.Certificate
+	byARN := make(map[string]*loadbalancerfern.Certificate)
+	for _, certificates := range certificateGroups {
+		for _, certificate := range certificates {
+			if certificate == nil {
+				continue
+			}
+			if existing, ok := byARN[certificate.Arn]; ok {
+				existing.IsDefault = existing.IsDefault || certificate.IsDefault
+				continue
+			}
+			byARN[certificate.Arn] = certificate
+			result = append(result, certificate)
+		}
+	}
+	return result
 }
 
 func targetGroupForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, loadBalancerArn *string, region string) ([]*loadbalancerfern.TargetGroupInstance, []string) {
@@ -279,7 +313,6 @@ func targetGroupForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, 
 			targets, err := targetsForTargetGroupV2(ctx, client, awsTargetGroup)
 			if err != nil {
 				errorMessages = append(errorMessages, err.Error())
-				continue
 			}
 
 			// Create TargetGroupInstance

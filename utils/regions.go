@@ -3,6 +3,7 @@ package utils
 import (
 	// Standard
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -11,7 +12,6 @@ import (
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/palantir/witchcraft-go-logging/wlog"
 
 	// Import wlog-zap for its side effects, initializing the zap logger
@@ -26,34 +26,111 @@ func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string
 
 	log.Info("Starting GetAWSRegions function")
 
-	queryRegion := cfg.Region
-	if queryRegion == "" {
-		queryRegion = "us-east-1"
-		if len(selectedRegions) > 0 && selectedRegions[0] != "" {
-			queryRegion = selectedRegions[0]
+	normalizedSelectedRegions := selectedRegions
+	if len(selectedRegions) > 0 {
+		regions, err := normalizeSelectedRegions(selectedRegions)
+		if err != nil {
+			return nil, err
 		}
+		normalizedSelectedRegions = regions
 	}
 
+	queryRegion, err := regionDiscoveryQueryRegion(cfg.Region, normalizedSelectedRegions)
+	if err != nil {
+		return nil, err
+	}
 	queryConfig := cfg.Copy()
 	queryConfig.Region = queryRegion
-	regions, err := enabledAWSRegions(ctx, ec2.NewFromConfig(queryConfig), selectedRegions)
+	regions, err := enabledAWSRegions(ctx, ec2.NewFromConfig(queryConfig), normalizedSelectedRegions)
 	if err != nil {
-		log.Error("Failed to discover enabled AWS regions", svc1log.SafeParam("region", queryRegion), svc1log.Stacktrace(err))
-		return nil, err
+		var discoveryErr *describeRegionsRequestError
+		if !errors.As(err, &discoveryErr) {
+			log.Error("Failed to validate enabled AWS regions", svc1log.SafeParam("region", queryRegion), svc1log.Stacktrace(err))
+			return nil, err
+		}
+		fallbackRegions, fallbackErr := regionDiscoveryFallback(cfg.Region, normalizedSelectedRegions, err)
+		if fallbackErr != nil {
+			log.Error("Failed to discover enabled AWS regions", svc1log.SafeParam("region", queryRegion), svc1log.Stacktrace(err))
+			return nil, fallbackErr
+		}
+		log.Warn(
+			"Unable to validate enabled AWS regions; using configured regions",
+			svc1log.SafeParam("regions", fallbackRegions),
+			svc1log.Stacktrace(err),
+		)
+		return fallbackRegions, nil
 	}
 
 	log.Info("Discovered enabled AWS regions", svc1log.SafeParam("regions", regions))
 	return regions, nil
 }
 
+func regionDiscoveryFallback(configRegion string, selectedRegions []string, discoveryErr error) ([]string, error) {
+	if len(selectedRegions) > 0 {
+		return selectedRegions, nil
+	}
+	if configRegion != "" {
+		regions, err := normalizeSelectedRegions([]string{configRegion})
+		if err != nil {
+			return nil, fmt.Errorf("describe enabled AWS regions: %w; configured region is invalid: %v", discoveryErr, err)
+		}
+		return regions, nil
+	}
+	return nil, discoveryErr
+}
+
+func regionDiscoveryQueryRegion(configRegion string, selectedRegions []string) (string, error) {
+	if len(selectedRegions) == 0 {
+		if configRegion != "" {
+			return configRegion, nil
+		}
+		return "us-east-1", nil
+	}
+
+	partition, err := awsPartitionForRegion(selectedRegions[0])
+	if err != nil {
+		return "", err
+	}
+	switch partition {
+	case "aws-cn":
+		return "cn-north-1", nil
+	case "aws-us-gov":
+		return "us-gov-west-1", nil
+	case "aws-iso":
+		return "us-iso-east-1", nil
+	case "aws-iso-b":
+		return "us-isob-east-1", nil
+	case "aws-iso-e":
+		return "eu-isoe-west-1", nil
+	case "aws-iso-f":
+		return "us-isof-south-1", nil
+	case "aws-eusc":
+		return "eusc-de-east-1", nil
+	default:
+		return "us-east-1", nil
+	}
+}
+
 type describeRegionsAPI interface {
 	DescribeRegions(context.Context, *ec2.DescribeRegionsInput, ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error)
+}
+
+type describeRegionsRequestError struct {
+	err error
+}
+
+func (e *describeRegionsRequestError) Error() string {
+	return fmt.Sprintf("describe enabled AWS regions: %v", e.err)
+}
+
+func (e *describeRegionsRequestError) Unwrap() error {
+	return e.err
 }
 
 func enabledAWSRegions(ctx context.Context, client describeRegionsAPI, selectedRegions []string) ([]string, error) {
 	output, err := client.DescribeRegions(ctx, &ec2.DescribeRegionsInput{AllRegions: aws.Bool(false)})
 	if err != nil {
-		return nil, fmt.Errorf("describe enabled AWS regions: %w", err)
+		return nil, &describeRegionsRequestError{err: err}
 	}
 	if output == nil {
 		return nil, fmt.Errorf("describe enabled AWS regions returned no response")
@@ -66,35 +143,45 @@ func enabledAWSRegions(ctx context.Context, client describeRegionsAPI, selectedR
 		}
 	}
 
-	if len(selectedRegions) == 0 {
-		if len(enabled) == 0 {
-			return nil, fmt.Errorf("no enabled AWS regions returned")
-		}
-		return sortedRegionNames(enabled), nil
+	if len(enabled) == 0 {
+		return nil, fmt.Errorf("no enabled AWS regions returned")
 	}
+	if len(selectedRegions) > 0 {
+		var unavailable []string
+		for _, region := range selectedRegions {
+			if _, ok := enabled[region]; !ok {
+				unavailable = append(unavailable, region)
+			}
+		}
+		if len(unavailable) > 0 {
+			return nil, fmt.Errorf("AWS regions are not enabled or do not exist: %s", strings.Join(unavailable, ", "))
+		}
+		return selectedRegions, nil
+	}
+	return sortedRegionNames(enabled), nil
+}
 
+func normalizeSelectedRegions(selectedRegions []string) ([]string, error) {
 	selected := make(map[string]struct{}, len(selectedRegions))
+	partition := ""
 	for _, region := range selectedRegions {
-		if region != "" {
-			selected[region] = struct{}{}
+		if region == "" {
+			continue
 		}
-	}
-
-	valid := make(map[string]struct{}, len(selected))
-	var invalid []string
-	for region := range selected {
-		if _, ok := enabled[region]; ok {
-			valid[region] = struct{}{}
-		} else {
-			invalid = append(invalid, region)
+		regionPartition, err := awsPartitionForRegion(region)
+		if err != nil {
+			return nil, err
 		}
+		if partition != "" && regionPartition != partition {
+			return nil, fmt.Errorf("selected AWS regions must belong to one partition")
+		}
+		partition = regionPartition
+		selected[region] = struct{}{}
 	}
-	if len(invalid) > 0 {
-		sort.Strings(invalid)
-		return nil, fmt.Errorf("AWS regions are not enabled or do not exist: %s", strings.Join(invalid, ", "))
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("at least one AWS region must be selected")
 	}
-
-	return sortedRegionNames(valid), nil
+	return sortedRegionNames(selected), nil
 }
 
 func sortedRegionNames(regions map[string]struct{}) []string {
@@ -104,42 +191,4 @@ func sortedRegionNames(regions map[string]struct{}) []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-func GetRegionsToCheck(ctx context.Context, selectedRegions []string) []string {
-	log := svc1log.FromContext(ctx)
-	if len(selectedRegions) > 0 {
-		log.Info(fmt.Sprintf("Using selected regions: %v", selectedRegions))
-		return selectedRegions
-	}
-
-	log.Info("No regions selected, checking all regions")
-	allRegions := make(map[string]struct{})
-	resolver := endpoints.DefaultResolver()
-	partitions := resolver.(endpoints.EnumPartitions).Partitions()
-
-	for _, p := range partitions {
-		for region := range p.Regions() {
-			allRegions[region] = struct{}{}
-		}
-	}
-	regions := sortedRegionNames(allRegions)
-	log.Info(fmt.Sprintf("All regions to check: %v", regions))
-	return regions
-}
-
-// GetGeneralRegionsList returns a list of known AWS regions.
-func GetGeneralRegionsList() []string {
-	resolver := endpoints.DefaultResolver()
-	for _, partition := range resolver.(endpoints.EnumPartitions).Partitions() {
-		if partition.ID() != endpoints.AwsPartitionID {
-			continue
-		}
-		regions := make(map[string]struct{}, len(partition.Regions()))
-		for region := range partition.Regions() {
-			regions[region] = struct{}{}
-		}
-		return sortedRegionNames(regions)
-	}
-	return nil
 }

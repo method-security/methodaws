@@ -44,16 +44,7 @@ func parseBucketURL(raw string) (string, string) {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	labels := strings.Split(host, ".")
-
-	// Check if this is a standard AWS endpoint
-	isAwsEndpoint := false
-	if len(labels) >= 2 {
-		domain := strings.Join(labels[len(labels)-2:], ".") // "amazonaws.com" or "amazonaws.com.cn"
-		if domain == "amazonaws.com" || domain == "amazonaws.com.cn" {
-			isAwsEndpoint = true
-		}
-	}
+	labels, isAwsEndpoint := s3EndpointLabels(host)
 
 	// If not a standard AWS endpoint, treat as custom domain (CNAME) pointing to S3
 	if !isAwsEndpoint {
@@ -62,96 +53,84 @@ func parseBucketURL(raw string) (string, string) {
 		return cleanupBucket(host), ""
 	}
 
-	// For AWS endpoints, ensure we have enough labels to process
-	if len(labels) < 3 {
+	if len(labels) == 0 {
 		return "", ""
 	}
 
 	// First path segment (for path-style)
 	pathSeg := firstPathSegment(u.Path)
 
-	// ----- Patterns -----
-
-	// 1) Path-style regional: s3.<region>.amazonaws.com / bucket
-	//    Also handles dualstack: s3.dualstack.<region>.amazonaws.com / bucket
-	if labels[0] == "s3" || (labels[0] == "s3" && len(labels) >= 2 && labels[1] == "dualstack") || labels[0] == "s3-dualstack" {
+	// Path-style endpoints put the service before the region and bucket in the path.
+	if labels[0] == "s3" || labels[0] == "s3-external-1" || labels[0] == "s3-dualstack" {
 		if pathSeg == "" {
 			return "", ""
 		}
-		region := ""
-		// s3.<region>....  -> region is labels[1]
-		// s3.dualstack.<region>.... OR s3-dualstack.<region>.... -> region is labels[2]
-		if labels[0] == "s3" && len(labels) >= 4 && labels[1] != "amazonaws" {
-			region = labels[1]
-		} else if (labels[0] == "s3" && len(labels) >= 5 && labels[1] == "dualstack") ||
-			(labels[0] == "s3-dualstack" && len(labels) >= 5) {
-			// s3.dualstack.<region>.amazonaws.com
-			// s3-dualstack.<region>.amazonaws.com
-			region = labels[2]
-		} else {
-			// Global path-style (s3.amazonaws.com / bucket) or unrecognized
-			region = ""
+		region, ok := pathStyleRegion(labels)
+		if !ok {
+			return "", ""
 		}
 		return cleanupBucket(pathSeg), region
 	}
 
-	// Check for virtual-hosted style by finding .s3. pattern
-	// This handles bucket names with subdomains like sub.domain.bucket.s3.region.amazonaws.com
-	s3Index := findS3Index(labels)
-	if s3Index >= 0 {
-		// Extract bucket name (everything before .s3.)
-		bucketParts := labels[:s3Index]
-		bucket := strings.Join(bucketParts, ".")
-
-		// Check what comes after .s3.
-		if s3Index+1 < len(labels) {
-			// 2) Virtual-hosted, regional: bucket.s3.<region>.amazonaws.com
-			if s3Index+3 < len(labels) && labels[s3Index+2] == "amazonaws" {
-				region := labels[s3Index+1]
-				return cleanupBucket(bucket), region
-			}
-			// 3) Virtual-hosted, global: bucket.s3.amazonaws.com
-			if s3Index+2 < len(labels) && labels[s3Index+1] == "amazonaws" {
-				return cleanupBucket(bucket), ""
-			}
+	// Virtual-hosted endpoints put one of the S3 service forms after the bucket name.
+	for index, label := range labels {
+		if index == 0 {
+			continue
 		}
-	}
-
-	// 4) Website endpoints: bucket.s3-website-<region>.amazonaws.com
-	//    Look for s3-website- pattern in any label position (to handle bucket subdomains)
-	for i, label := range labels {
-		if strings.HasPrefix(label, "s3-website-") {
-			if i >= 1 && i+2 < len(labels) && labels[i+1] == "amazonaws" {
-				bucketParts := labels[:i]
-				bucket := strings.Join(bucketParts, ".")
-				region := strings.TrimPrefix(label, "s3-website-")
-				return cleanupBucket(bucket), region
-			}
+		region, ok := virtualHostedRegion(label, labels[index+1:])
+		if ok {
+			return cleanupBucket(strings.Join(labels[:index], ".")), region
 		}
-	}
-
-	// 5) Accelerate endpoints: bucket.s3-accelerate.amazonaws.com (or ...dualstack...)
-	//    Look for s3-accelerate pattern in any label position (to handle bucket subdomains)
-	for i, label := range labels {
-		if label == "s3-accelerate" || strings.HasPrefix(label, "s3-accelerate") {
-			if i >= 1 && i+2 < len(labels) && labels[i+1] == "amazonaws" {
-				bucketParts := labels[:i]
-				bucket := strings.Join(bucketParts, ".")
-				return cleanupBucket(bucket), ""
-			}
-		}
-	}
-
-	// 6) Legacy global path-style: s3.amazonaws.com/bucket
-	if strings.EqualFold(host, "s3.amazonaws.com") || strings.EqualFold(host, "s3-external-1.amazonaws.com") {
-		if pathSeg == "" {
-			return "", ""
-		}
-		return cleanupBucket(pathSeg), ""
 	}
 
 	// Not recognized as S3 bucket URL
 	return "", ""
+}
+
+func s3EndpointLabels(host string) ([]string, bool) {
+	for _, suffix := range []string{"amazonaws.com.cn", "amazonaws.com"} {
+		prefix, found := strings.CutSuffix(host, "."+suffix)
+		if found && prefix != "" {
+			return strings.Split(prefix, "."), true
+		}
+	}
+	return nil, false
+}
+
+func pathStyleRegion(labels []string) (string, bool) {
+	switch {
+	case len(labels) == 1 && (labels[0] == "s3" || labels[0] == "s3-external-1"):
+		return "", true
+	case len(labels) == 2 && labels[0] == "s3":
+		return labels[1], true
+	case len(labels) == 3 && labels[0] == "s3" && labels[1] == "dualstack":
+		return labels[2], true
+	case len(labels) == 2 && labels[0] == "s3-dualstack":
+		return labels[1], true
+	default:
+		return "", false
+	}
+}
+
+func virtualHostedRegion(serviceLabel string, trailingLabels []string) (string, bool) {
+	switch {
+	case serviceLabel == "s3" && len(trailingLabels) == 0:
+		return "", true
+	case serviceLabel == "s3" && len(trailingLabels) == 1:
+		return trailingLabels[0], true
+	case serviceLabel == "s3" && len(trailingLabels) == 2 && trailingLabels[0] == "dualstack":
+		return trailingLabels[1], true
+	case serviceLabel == "s3-accelerate" && len(trailingLabels) == 0:
+		return "", true
+	case serviceLabel == "s3-accelerate" && len(trailingLabels) == 1 && trailingLabels[0] == "dualstack":
+		return "", true
+	case serviceLabel == "s3-website" && len(trailingLabels) == 1:
+		return trailingLabels[0], true
+	case strings.HasPrefix(serviceLabel, "s3-website-") && len(trailingLabels) == 0:
+		return strings.TrimPrefix(serviceLabel, "s3-website-"), true
+	default:
+		return "", false
+	}
 }
 
 func ensureURL(raw string) *url.URL {
@@ -181,22 +160,6 @@ func firstPathSegment(p string) string {
 	}
 	// ignore query/fragment (already stripped by url.Parse)
 	return seg
-}
-
-// findS3Index finds the index of "s3" label in virtual-hosted style URLs
-// Returns -1 if "s3" is not found at an appropriate position
-func findS3Index(labels []string) int {
-	for i, label := range labels {
-		if label == "s3" {
-			// Make sure this is a virtual-hosted pattern, not a path-style one
-			// Virtual-hosted: bucket[.subdomain].s3[.region].amazonaws.com
-			// Path-style: s3[.region].amazonaws.com/bucket
-			if i > 0 { // s3 should not be the first label for virtual-hosted
-				return i
-			}
-		}
-	}
-	return -1
 }
 
 func cleanupBucket(b string) string {

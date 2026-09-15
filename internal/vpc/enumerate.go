@@ -267,13 +267,22 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 		enableLni = &lni
 	}
 
-	// Convert PrivateDnsNameOptionsOnLaunch from complex type to string
-	var privateDNSOptions *string
+	var privateDNSOptions *vpcfern.PrivateDnsNameOptionsOnLaunch
 	if awsSubnet.PrivateDnsNameOptionsOnLaunch != nil {
-		// Convert the complex type to a simple string representation
-		// You might want to serialize this properly based on your needs
-		options := "enabled" // This is a placeholder - you may want to extract specific fields
-		privateDNSOptions = &options
+		privateDNSOptions = &vpcfern.PrivateDnsNameOptionsOnLaunch{
+			EnableResourceNameDnsARecord:    awsSubnet.PrivateDnsNameOptionsOnLaunch.EnableResourceNameDnsARecord,
+			EnableResourceNameDnsAaaaRecord: awsSubnet.PrivateDnsNameOptionsOnLaunch.EnableResourceNameDnsAAAARecord,
+		}
+		if awsSubnet.PrivateDnsNameOptionsOnLaunch.HostnameType != "" {
+			hostnameType, err := vpcfern.NewSubnetHostnameTypeFromString(
+				strings.ToUpper(strings.ReplaceAll(string(awsSubnet.PrivateDnsNameOptionsOnLaunch.HostnameType), "-", "_")),
+			)
+			if err != nil {
+				errors = append(errors, err.Error())
+			} else {
+				privateDNSOptions.HostnameType = &hostnameType
+			}
+		}
 	}
 
 	// Create AvailabilityZone object from AWS data

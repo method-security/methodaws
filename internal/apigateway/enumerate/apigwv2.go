@@ -3,13 +3,22 @@ package apigateway
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
 	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
+)
+
+type vpcLinkBackendService string
+
+const (
+	vpcLinkBackendServiceElasticLoadBalancing vpcLinkBackendService = "elasticloadbalancing"
+	vpcLinkBackendServiceServiceDiscovery     vpcLinkBackendService = "servicediscovery"
 )
 
 // enumerateV2ApiGatewaysAllRegions enumerates v2 API Gateways (HTTP APIs) across all specified regions
@@ -139,24 +148,13 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 
 	// Get stages for this API
 	stages, err := getAllHTTPAPIStages(ctx, client, *api.ApiId)
-	var primaryStageName *string
 	if err != nil {
 		errors = append(errors, err.Error())
-	} else if len(stages) > 0 {
-		// Use the first non-$default stage found
-		for _, stage := range stages {
-			if stage.StageName != nil && *stage.StageName != "$default" {
-				primaryStageName = stage.StageName
-				break
-			}
-		}
 	}
+	stageNames := httpAPIStageNames(stages)
 
-	// Get access log settings
-	accessLogSettings, err := getHTTPAPIAccessLogSettings(ctx, client, *api.ApiId)
-	if err != nil {
-		errors = append(errors, err.Error())
-	}
+	// Access log settings are included in the stage response already collected above.
+	accessLogSettings := accessLogSettingsFromHTTPAPIStages(stages)
 	// Perform security analysis
 	securityAnalysis := analyzeAPISecurity(routes, certificates, accessLogSettings, corsConfig, nil) // V2 doesn't use API keys the same way
 
@@ -176,7 +174,7 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	configuration := &apigatewayfern.ApiGatewayConfigurationInfo{
 		Version:           apigatewayfern.ApiGatewayVersionV2,
 		Description:       api.Description,
-		Stage:             primaryStageName,
+		Stages:            stageNames,
 		AccessLogSettings: accessLogSettings,
 		CorsConfiguration: corsConfig,
 		Certificates:      certificates,
@@ -196,6 +194,23 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	}
 
 	return apiGatewayInstance, errors
+}
+
+func httpAPIStageNames(stages []types.Stage) []string {
+	stageNames := make([]string, 0, len(stages))
+	seen := make(map[string]struct{}, len(stages))
+	for _, stage := range stages {
+		if stage.StageName == nil || *stage.StageName == "" {
+			continue
+		}
+		if _, ok := seen[*stage.StageName]; ok {
+			continue
+		}
+		seen[*stage.StageName] = struct{}{}
+		stageNames = append(stageNames, *stage.StageName)
+	}
+	sort.Strings(stageNames)
+	return stageNames
 }
 
 // getHTTPAPIRoutes retrieves routes for an HTTP API
@@ -336,7 +351,10 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 		// Check if this is a VPC Link integration (private load balancer)
 		if integration.ConnectionType == types.ConnectionTypeVpcLink &&
 			integration.ConnectionId != nil {
-			backend := createV2LoadBalancerBackend(integration, region)
+			backend, err := createV2VpcLinkBackend(integration)
+			if err != nil {
+				return nil, err
+			}
 			return &apigatewayfern.Integration{Type: "vpc_link", VpcLink: &apigatewayfern.VpcLinkIntegration{
 				Backend: backend,
 			}}, nil
@@ -369,7 +387,10 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 		// Check if this is a VPC Link integration (private load balancer)
 		if integration.ConnectionType == types.ConnectionTypeVpcLink &&
 			integration.ConnectionId != nil {
-			backend := createV2LoadBalancerBackend(integration, region)
+			backend, err := createV2VpcLinkBackend(integration)
+			if err != nil {
+				return nil, err
+			}
 			return &apigatewayfern.Integration{Type: "vpc_link", VpcLink: &apigatewayfern.VpcLinkIntegration{
 				Backend: backend,
 			}}, nil
@@ -385,10 +406,13 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 		}}, nil
 
 	case types.IntegrationTypeAwsProxy:
-		arn := aws.ToString(integration.IntegrationUri)
+		functionARN, functionName, err := lambdaFunctionFromIntegrationURI(aws.ToString(integration.IntegrationUri))
+		if err != nil {
+			return nil, err
+		}
 		backend := &apigatewayfern.LambdaBackend{
-			Arn:          arn,
-			FunctionName: extractResourceNameFromArn(arn),
+			Arn:          functionARN,
+			FunctionName: functionName,
 			Region:       region,
 		}
 
@@ -407,30 +431,66 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 	}
 }
 
-// createV2LoadBalancerBackend creates a LoadBalancerBackend from V2 integration details
-func createV2LoadBalancerBackend(integration *apigatewayv2.GetIntegrationOutput, region string) *apigatewayfern.LoadBalancerBackend {
+func createV2VpcLinkBackend(integration *apigatewayv2.GetIntegrationOutput) (*apigatewayfern.VpcLinkBackend, error) {
 	uri := aws.ToString(integration.IntegrationUri)
 	connectionID := aws.ToString(integration.ConnectionId)
+	if uri == "" || connectionID == "" {
+		return nil, fmt.Errorf("VPC Link integration missing URI or connection ID")
+	}
 
-	// Extract DNS name from URI
-	dnsName := extractDNSNameFromURI(uri)
+	resourceARN := strings.SplitN(uri, "?", 2)[0]
+	parsed, err := awsarn.Parse(resourceARN)
+	if err != nil {
+		return nil, fmt.Errorf("parse VPC Link integration URI %q: %w", uri, err)
+	}
 
-	return &apigatewayfern.LoadBalancerBackend{
-		Uri:             uri,
-		VpcLinkId:       connectionID,
-		LoadBalancerArn: "", // Would need additional API call to get actual ARN
-		DnsName:         &dnsName,
+	switch vpcLinkBackendService(parsed.Service) {
+	case vpcLinkBackendServiceElasticLoadBalancing:
+		parts := strings.Split(parsed.Resource, "/")
+		if len(parts) != 5 || parts[0] != "listener" || (parts[1] != "app" && parts[1] != "net") {
+			return nil, fmt.Errorf("VPC Link integration URI is not an ALB or NLB listener ARN: %s", uri)
+		}
+		loadBalancerARN := parsed
+		loadBalancerARN.Resource = strings.Join(append([]string{"loadbalancer"}, parts[1:4]...), "/")
+		listenerARN := parsed.String()
+		loadBalancerARNString := loadBalancerARN.String()
+		return &apigatewayfern.VpcLinkBackend{
+			Type: "load_balancer",
+			LoadBalancer: &apigatewayfern.LoadBalancerBackend{
+				Uri:              uri,
+				VpcLinkId:        connectionID,
+				LoadBalancerArn:  &loadBalancerARNString,
+				LoadBalancerArns: []string{loadBalancerARNString},
+				ListenerArn:      &listenerARN,
+			},
+		}, nil
+	case vpcLinkBackendServiceServiceDiscovery:
+		return &apigatewayfern.VpcLinkBackend{
+			Type: "service_discovery",
+			ServiceDiscovery: &apigatewayfern.ServiceDiscoveryBackend{
+				Uri:        uri,
+				VpcLinkId:  connectionID,
+				ServiceArn: resourceARN,
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported VPC Link integration URI service %q", parsed.Service)
 	}
 }
 
 // getHTTPAPICertificates retrieves certificates for an HTTP API
-func getHTTPAPICertificates(ctx context.Context, client *apigatewayv2.Client, apiID string) ([]*apigatewayfern.Certificate, []string) {
+type httpAPICertificateAPI interface {
+	getDomainNamesAPI
+	getAPIMappingsAPI
+}
+
+func getHTTPAPICertificates(ctx context.Context, client httpAPICertificateAPI, apiID string) ([]*apigatewayfern.Certificate, []string) {
 	var certificates []*apigatewayfern.Certificate
 	var errors []string
 
 	allDomains, err := getAllHTTPAPIDomainNames(ctx, client)
 	if err != nil {
-		return certificates, []string{err.Error()}
+		errors = append(errors, err.Error())
 	}
 
 	for _, domain := range allDomains {
@@ -442,7 +502,6 @@ func getHTTPAPICertificates(ctx context.Context, client *apigatewayv2.Client, ap
 		mappings, err := getAllHTTPAPIMappings(ctx, client, *domain.DomainName)
 		if err != nil {
 			errors = append(errors, err.Error())
-			continue
 		}
 
 		// Check if any mapping is for our API
@@ -480,23 +539,23 @@ func getHTTPAPICertificates(ctx context.Context, client *apigatewayv2.Client, ap
 }
 
 // getHTTPAPIAccessLogSettings retrieves access log configuration
-func getHTTPAPIAccessLogSettings(ctx context.Context, client *apigatewayv2.Client, apiID string) (*apigatewayfern.AccessLogSettings, error) {
+func getHTTPAPIAccessLogSettings(ctx context.Context, client getStagesAPI, apiID string) (*apigatewayfern.AccessLogSettings, error) {
 	stages, err := getAllHTTPAPIStages(ctx, client, apiID)
-	if err != nil {
-		return nil, err
-	}
+	return accessLogSettingsFromHTTPAPIStages(stages), err
+}
 
+func accessLogSettingsFromHTTPAPIStages(stages []types.Stage) *apigatewayfern.AccessLogSettings {
 	// Look for access log settings in any stage (typically $default)
 	for _, stage := range stages {
 		if stage.AccessLogSettings != nil && stage.AccessLogSettings.DestinationArn != nil {
 			return &apigatewayfern.AccessLogSettings{
 				DestinationArn: *stage.AccessLogSettings.DestinationArn,
 				Format:         stage.AccessLogSettings.Format,
-			}, nil
+			}
 		}
 	}
 
-	return nil, nil
+	return nil
 }
 
 type getStagesAPI interface {

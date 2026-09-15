@@ -2,6 +2,7 @@ package waf
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	waffern "github.com/Method-Security/methodaws/generated/go/waf"
@@ -17,6 +18,8 @@ type stubWAFClient struct {
 	listScopes        []types.Scope
 	resourceListCalls int
 	resourceTypes     []types.ResourceType
+	resourceErrors    map[types.ResourceType]error
+	getOutput         *wafv2.GetWebACLOutput
 }
 
 func (s *stubWAFClient) ListWebACLs(
@@ -35,6 +38,9 @@ func (s *stubWAFClient) GetWebACL(
 	*wafv2.GetWebACLInput,
 	...func(*wafv2.Options),
 ) (*wafv2.GetWebACLOutput, error) {
+	if s.getOutput != nil {
+		return s.getOutput, nil
+	}
 	return &wafv2.GetWebACLOutput{WebACL: &types.WebACL{DefaultAction: &types.DefaultAction{Allow: &types.AllowAction{}}}}, nil
 }
 
@@ -45,14 +51,50 @@ func (s *stubWAFClient) ListResourcesForWebACL(
 ) (*wafv2.ListResourcesForWebACLOutput, error) {
 	s.resourceListCalls++
 	s.resourceTypes = append(s.resourceTypes, input.ResourceType)
+	if err := s.resourceErrors[input.ResourceType]; err != nil {
+		return nil, err
+	}
 	if input.ResourceType == types.ResourceTypeApplicationLoadBalancer {
 		return &wafv2.ListResourcesForWebACLOutput{ResourceArns: []string{
-			"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/example/abc",
+			"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/first/abc",
+			"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/second/def",
 		}}, nil
 	}
 	return &wafv2.ListResourcesForWebACLOutput{ResourceArns: []string{
-		"arn:aws:apigateway:us-east-1::/restapis/api-id/stages/prod",
+		"arn:aws:apigateway:us-east-1::/restapis/first-api/stages/prod",
+		"arn:aws:apigateway:us-east-1::/restapis/second-api/stages/prod",
 	}}, nil
+}
+
+func TestCloudFrontWAFRegionRequiresCommercialPartition(t *testing.T) {
+	t.Parallel()
+
+	region, ok := cloudFrontWAFRegion("", []string{"us-west-2"})
+	assert.True(t, ok)
+	assert.Equal(t, "us-east-1", region)
+	region, ok = cloudFrontWAFRegion("", []string{"mx-central-1"})
+	assert.True(t, ok)
+	assert.Equal(t, "us-east-1", region)
+
+	_, ok = cloudFrontWAFRegion("", []string{"us-gov-west-1"})
+	assert.False(t, ok)
+	_, ok = cloudFrontWAFRegion("", []string{"cn-north-1"})
+	assert.False(t, ok)
+}
+
+func TestResourcesForWebACLContinuesAfterOneResourceTypeFails(t *testing.T) {
+	t.Parallel()
+
+	client := &stubWAFClient{resourceErrors: map[types.ResourceType]error{
+		types.ResourceTypeApplicationLoadBalancer: errors.New("load balancer associations denied"),
+	}}
+	resources, errs := resourcesForWebACL(context.Background(), client, aws.String("web-acl"), "us-east-1")
+
+	require.Equal(t, []string{"load balancer associations denied"}, errs)
+	assert.Equal(t, 2, client.resourceListCalls)
+	require.Len(t, resources, 2)
+	assert.Contains(t, resources[0], ":apigateway:")
+	assert.Contains(t, resources[1], ":apigateway:")
 }
 
 func TestEnumerateWAFForScopePaginatesAndListsAssociationsOnce(t *testing.T) {
@@ -76,8 +118,14 @@ func TestEnumerateWAFForScopePaginatesAndListsAssociationsOnce(t *testing.T) {
 		types.ResourceTypeApplicationLoadBalancer,
 		types.ResourceTypeApiGateway,
 	}, client.resourceTypes)
-	assert.NotNil(t, wafs[0].Resources.LoadBalancer)
-	assert.NotNil(t, wafs[0].Resources.ApiGateway)
+	require.Len(t, wafs[0].Resources.LoadBalancers, 2)
+	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/first/abc",
+		wafs[0].Resources.LoadBalancers[0].Arn)
+	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/second/def",
+		wafs[0].Resources.LoadBalancers[1].Arn)
+	require.Len(t, wafs[0].Resources.ApiGateways, 2)
+	assert.Equal(t, "first-api", *wafs[0].Resources.ApiGateways[0].ApiId)
+	assert.Equal(t, "second-api", *wafs[0].Resources.ApiGateways[1].ApiId)
 }
 
 func TestEnumerateCloudFrontWAFDoesNotListRegionalAssociations(t *testing.T) {
@@ -94,4 +142,31 @@ func TestEnumerateCloudFrontWAFDoesNotListRegionalAssociations(t *testing.T) {
 	require.Len(t, wafs, 1)
 	assert.Equal(t, waffern.ScopeTypeCloudfront, wafs[0].Configuration.Scope)
 	assert.Zero(t, client.resourceListCalls)
+}
+
+func TestEnumerateWAFSkipsRuleWithMissingStatement(t *testing.T) {
+	t.Parallel()
+
+	client := &stubWAFClient{
+		listOutputs: []*wafv2.ListWebACLsOutput{{WebACLs: []types.WebACLSummary{{
+			ARN: aws.String("arn:aws:wafv2:us-east-1:123456789012:global/webacl/example/id"),
+			Id:  aws.String("id"), Name: aws.String("example"),
+		}}}},
+		getOutput: &wafv2.GetWebACLOutput{WebACL: &types.WebACL{
+			DefaultAction: &types.DefaultAction{Allow: &types.AllowAction{}},
+			Rules: []types.Rule{
+				{Name: aws.String("incomplete")},
+				{Name: aws.String("valid"), Statement: &types.Statement{ByteMatchStatement: &types.ByteMatchStatement{}}},
+			},
+		}},
+	}
+
+	wafs, errs := enumerateWAFForScope(
+		context.Background(), client, "us-east-1", types.ScopeCloudfront, waffern.ScopeTypeCloudfront,
+	)
+
+	require.Len(t, wafs, 1)
+	require.Len(t, wafs[0].Resources.Rules, 1)
+	assert.Equal(t, "valid", wafs[0].Resources.Rules[0].Identification.Name)
+	assert.Contains(t, errs, "WAF Rule incomplete Statement is nil")
 }

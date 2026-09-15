@@ -19,8 +19,8 @@ func extractDistributionComment(comment *string) *string {
 }
 
 // extractDistributionStatus determines the distribution status
-func extractDistributionStatus(enabled *bool) cloudfrontfern.CloudFrontDistributionStatus {
-	if enabled != nil && !*enabled {
+func extractDistributionStatus(enabled bool) cloudfrontfern.CloudFrontDistributionStatus {
+	if !enabled {
 		return cloudfrontfern.CloudFrontDistributionStatusDisabled
 	}
 	return cloudfrontfern.CloudFrontDistributionStatusEnabled
@@ -30,22 +30,22 @@ func transformDistributionToFern(ctx context.Context, awsConfig aws.Config, dist
 	if dist.ARN == nil {
 		return nil, []string{"Distribution ARN is nil"}
 	}
+	if dist.DistributionConfig == nil {
+		return nil, []string{"Distribution configuration is nil"}
+	}
+	if dist.DistributionConfig.Enabled == nil {
+		return nil, []string{"Distribution Enabled is nil"}
+	}
 	var errors []string
 	// Transform origins with enhanced details
 	var origins []*cloudfrontfern.CloudFrontDistributionOrigin
-	if dist.DistributionConfig != nil && dist.DistributionConfig.Origins != nil {
+	if dist.DistributionConfig.Origins != nil {
 		origins, errors = processOrigins(ctx, awsConfig, dist.DistributionConfig.Origins.Items, accountID)
 	}
 
 	// Extract comment and status using helper functions
-	var comment *string
-	var status cloudfrontfern.CloudFrontDistributionStatus
-	if dist.DistributionConfig != nil {
-		comment = extractDistributionComment(dist.DistributionConfig.Comment)
-		status = extractDistributionStatus(dist.DistributionConfig.Enabled)
-	} else {
-		status = cloudfrontfern.CloudFrontDistributionStatusEnabled
-	}
+	comment := extractDistributionComment(dist.DistributionConfig.Comment)
+	status := extractDistributionStatus(*dist.DistributionConfig.Enabled)
 
 	// Create distribution with nested structure
 	return &cloudfrontfern.CloudFrontDistribution{
@@ -69,6 +69,9 @@ func transformDistributionSummaryToFern(ctx context.Context, awsConfig aws.Confi
 	if dist.ARN == nil {
 		return nil, []string{"Distribution ARN is nil"}
 	}
+	if dist.Enabled == nil {
+		return nil, []string{"Distribution Enabled is nil"}
+	}
 	var errors []string
 	// Transform origins (limited info from summary)
 	var origins []*cloudfrontfern.CloudFrontDistributionOrigin
@@ -78,7 +81,7 @@ func transformDistributionSummaryToFern(ctx context.Context, awsConfig aws.Confi
 
 	// Extract comment and status using helper functions
 	comment := extractDistributionComment(dist.Comment)
-	status := extractDistributionStatus(dist.Enabled)
+	status := extractDistributionStatus(*dist.Enabled)
 
 	// Create distribution with nested structure
 	return &cloudfrontfern.CloudFrontDistribution{

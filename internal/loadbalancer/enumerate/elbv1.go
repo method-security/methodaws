@@ -7,6 +7,7 @@ import (
 
 	"github.com/Method-Security/methodaws/generated/go/common"
 	loadbalancerfern "github.com/Method-Security/methodaws/generated/go/loadbalancer"
+	methodawsutils "github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing/types"
@@ -14,14 +15,14 @@ import (
 )
 
 // enumerateV1LoadBalancersAllRegions enumerates v1 load balancers across all specified regions
-func enumerateV1LoadBalancersAllRegions(ctx context.Context, awsConfig aws.Config, regions []string) ([]*loadbalancerfern.LoadBalancerInstance, []string) {
+func enumerateV1LoadBalancersAllRegions(ctx context.Context, awsConfig aws.Config, regions []string, accountID string) ([]*loadbalancerfern.LoadBalancerInstance, []string) {
 	log := svc1log.FromContext(ctx)
 	var allLoadBalancers []*loadbalancerfern.LoadBalancerInstance
 	var allErrors []string
 
 	for _, region := range regions {
 		log.Info("Processing v1 load balancers in region", svc1log.SafeParam("region", region))
-		loadBalancers, errors := enumerateV1LoadBalancersForRegion(ctx, awsConfig, region)
+		loadBalancers, errors := enumerateV1LoadBalancersForRegion(ctx, awsConfig, region, accountID)
 
 		if len(errors) > 0 {
 			log.Warn("Errors occurred while enumerating v1 load balancers in region",
@@ -41,7 +42,7 @@ func enumerateV1LoadBalancersAllRegions(ctx context.Context, awsConfig aws.Confi
 }
 
 // enumerateV1LoadBalancersForRegion enumerates v1 load balancers for a specific region
-func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, region string) ([]*loadbalancerfern.LoadBalancerInstance, []string) {
+func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, region, accountID string) ([]*loadbalancerfern.LoadBalancerInstance, []string) {
 	log := svc1log.FromContext(ctx)
 	cfg.Region = region
 
@@ -67,10 +68,9 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 				continue
 			}
 
-			// Create identification info
-			identification := &loadbalancerfern.LoadBalancerIdentificationInfo{
-				Name:   lb.LoadBalancerName,
-				Region: region,
+			identification, err := classicLoadBalancerIdentification(lb, region, accountID)
+			if err != nil {
+				errorMessages = append(errorMessages, err.Error())
 			}
 
 			// Create configuration info
@@ -120,6 +120,32 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 	}
 
 	return loadBalancers, errorMessages
+}
+
+func classicLoadBalancerIdentification(
+	loadBalancer types.LoadBalancerDescription,
+	region string,
+	accountID string,
+) (*loadbalancerfern.LoadBalancerIdentificationInfo, error) {
+	identification := &loadbalancerfern.LoadBalancerIdentificationInfo{
+		Name:   loadBalancer.LoadBalancerName,
+		Region: region,
+	}
+	if loadBalancer.LoadBalancerName == nil {
+		return identification, fmt.Errorf("Classic load balancer name is nil")
+	}
+
+	loadBalancerARN, err := methodawsutils.BuildRegionalARN(
+		region,
+		"elasticloadbalancing",
+		accountID,
+		"loadbalancer/"+*loadBalancer.LoadBalancerName,
+	)
+	if err != nil {
+		return identification, fmt.Errorf("build Classic load balancer ARN for %s: %w", *loadBalancer.LoadBalancerName, err)
+	}
+	identification.Arn = &loadBalancerARN
+	return identification, nil
 }
 
 func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*loadbalancerfern.Target, []string) {

@@ -22,11 +22,12 @@ types:
   ReferencedSecurityGroup:
     properties:
       groupId: string
-      userId: string
+      userId: optional<string>
   RulePeerInfo:
     properties:
       cidrs: optional<list<string>>
       referencedSecurityGroup: optional<ReferencedSecurityGroup>
+      prefixListId: optional<string>
 # Main Rule Structs
   RuleIdentificationInfo:
     properties:

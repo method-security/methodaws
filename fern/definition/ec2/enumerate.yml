@@ -16,20 +16,6 @@ types:
       - TERMINATED
       - STOPPING
       - STOPPED
-  InstanceType:
-    enum:
-      - T2_NANO
-      - T2_MICRO
-      - T2_SMALL
-      - T2_MEDIUM
-      - T2_LARGE
-      - T3_NANO
-      - T3_MICRO
-      - T3_SMALL
-      - T3_MEDIUM
-      - T3_LARGE
-      - M5_LARGE
-      - M5_XLARGE
   PlatformValues:
     enum:
       - WINDOWS
@@ -67,6 +53,14 @@ types:
       privateDnsName: optional<string>
       publicDnsName: optional<string>
 # Network Interface High level Structs
+  InstancePrivateIpAddress:
+    properties:
+      privateIpAddress: string
+      primary: optional<boolean>
+      privateDnsName: optional<string>
+      publicIpAddress: optional<string>
+      publicDnsName: optional<string>
+      publicIpOwnerId: optional<string>
   InstanceNetworkInterfaceIdentificationInfo:
     properties:
       id: string
@@ -80,6 +74,7 @@ types:
       macAddress: optional<string>
       privateIpAddress: optional<string>
       privateDnsName: optional<string>
+      privateIpAddresses: optional<list<InstancePrivateIpAddress>>
       sourceDestCheck: optional<boolean>
   InstanceNetworkInterfaceResourceInfo:
     properties:
@@ -101,7 +96,7 @@ types:
       state: optional<InstanceState>
       imageId: optional<string>
       keyName: optional<string>
-      instanceType: optional<InstanceType>
+      instanceType: optional<string>
       launchTime: optional<datetime>
       placement: optional<Placement>
       architecture: optional<Architecture>

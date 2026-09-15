@@ -367,11 +367,11 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 			errorMessages = append(errorMessages, "S3 bucket name is missing")
 			continue
 		}
-		ownerID := ""
-		ownerName := ""
+		var ownerID *string
+		var ownerName *string
 		if listBucketsOutput.Owner != nil {
-			ownerID = aws.ToString(listBucketsOutput.Owner.ID)
-			ownerName = aws.ToString(listBucketsOutput.Owner.DisplayName)
+			ownerID = listBucketsOutput.Owner.ID
+			ownerName = listBucketsOutput.Owner.DisplayName
 		}
 		s3Bucket := s3fern.S3Bucket{
 			Identification: &s3fern.S3BucketIdentificationInfo{
@@ -379,7 +379,7 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 				// Arn, Url, and Region will be set later
 			},
 			Configuration: &s3fern.S3BucketConfigurationInfo{
-				CreationDate: aws.ToTime(bucket.CreationDate),
+				CreationDate: bucket.CreationDate,
 				OwnerId:      ownerID,
 				OwnerName:    ownerName,
 			},

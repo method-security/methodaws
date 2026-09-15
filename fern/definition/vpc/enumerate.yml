@@ -24,6 +24,10 @@ types:
       - PENDING
       - AVAILABLE
       - UNAVAILABLE
+  SubnetHostnameType:
+    enum:
+      - IP_NAME
+      - RESOURCE_NAME
 # Supporting Types
   AvailabilityZone:
     properties:
@@ -39,6 +43,11 @@ types:
     properties:
       associationId: string
       cidrBlock: string
+  PrivateDnsNameOptionsOnLaunch:
+    properties:
+      hostnameType: optional<SubnetHostnameType>
+      enableResourceNameDnsARecord: optional<boolean>
+      enableResourceNameDnsAaaaRecord: optional<boolean>
 # Subnet High level structs
   SubnetIdentificationInfo:
     properties:
@@ -60,7 +69,7 @@ types:
       mapPublicIpOnLaunch: optional<boolean>
       outpostArn: optional<string>
       ownerId: optional<string>
-      privateDnsNameOptionsOnLaunch: optional<string>
+      privateDnsNameOptionsOnLaunch: optional<PrivateDnsNameOptionsOnLaunch>
       state: optional<SubnetState>
       tags: optional<list<common.Tag>>
   SubnetResourceInfo:

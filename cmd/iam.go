@@ -38,7 +38,7 @@ func (a *MethodAws) InitIamCommand() {
 
 			// Get Report
 			report := iamInternal.EnumerateIam(cmd.Context(), *a.AwsConfig, config)
-			a.OutputSignal.Content = report
+			a.setReport(report)
 		},
 	}
 

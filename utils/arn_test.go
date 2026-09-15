@@ -56,9 +56,11 @@ func TestBuildRegionalARNUsesRegionPartition(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"us-east-1":     "arn:aws:ec2:us-east-1:123456789012:instance/example",
-		"us-gov-west-1": "arn:aws-us-gov:ec2:us-gov-west-1:123456789012:instance/example",
-		"cn-north-1":    "arn:aws-cn:ec2:cn-north-1:123456789012:instance/example",
+		"us-east-1":      "arn:aws:ec2:us-east-1:123456789012:instance/example",
+		"mx-central-1":   "arn:aws:ec2:mx-central-1:123456789012:instance/example",
+		"us-gov-west-1":  "arn:aws-us-gov:ec2:us-gov-west-1:123456789012:instance/example",
+		"cn-north-1":     "arn:aws-cn:ec2:cn-north-1:123456789012:instance/example",
+		"eusc-de-east-1": "arn:aws-eusc:ec2:eusc-de-east-1:123456789012:instance/example",
 	}
 	for region, expected := range tests {
 		actual, err := BuildRegionalARN(region, "ec2", "123456789012", "instance/example")
@@ -73,4 +75,23 @@ func TestBuildGlobalARNForRegionOmitsARNRegion(t *testing.T) {
 	actual, err := BuildGlobalARNForRegion("us-gov-west-1", "s3", "", "example")
 	require.NoError(t, err)
 	assert.Equal(t, "arn:aws-us-gov:s3:::example", actual)
+}
+
+func TestBuildRegionalARNRejectsInvalidRegion(t *testing.T) {
+	t.Parallel()
+
+	_, err := BuildRegionalARN("not-a-region", "ec2", "123456789012", "instance/example")
+	require.EqualError(t, err, `invalid AWS region "not-a-region"`)
+}
+
+func TestIsCommercialAWSRegion(t *testing.T) {
+	t.Parallel()
+
+	commercial, err := IsCommercialAWSRegion("mx-central-1")
+	require.NoError(t, err)
+	assert.True(t, commercial)
+
+	commercial, err = IsCommercialAWSRegion("us-gov-west-1")
+	require.NoError(t, err)
+	assert.False(t, commercial)
 }
