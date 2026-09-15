@@ -228,10 +228,10 @@ func TestEvaluateS3AccessAppliesCompletePolicyDenyToACLRead(t *testing.T) {
 	assert.Equal(t, boolPointer(false), accessControl.AllowPublicRead)
 }
 
-func TestEvaluateS3AccessAppliesPutObjectDenyToACLWrite(t *testing.T) {
+func TestEvaluateS3AccessRequiresEveryACLWriteOperationToBeDenied(t *testing.T) {
 	t.Parallel()
 
-	denyPublicWrite := `{
+	denyPutObject := `{
 		"Statement": [{
 			"Effect": "Deny",
 			"Principal": "*",
@@ -239,23 +239,49 @@ func TestEvaluateS3AccessAppliesPutObjectDenyToACLWrite(t *testing.T) {
 			"Resource": "arn:aws:s3:::example-bucket/*"
 		}]
 	}`
-	accessControl, err := evaluateS3Access(accessEvaluationInput{
+	partiallyBlocked, err := evaluateS3Access(accessEvaluationInput{
 		bucketARN: testBucketARN,
 		grants: []types.Grant{
 			aclGrant(allUsersGroup, types.PermissionWrite),
 			aclGrant(logDeliveryGroup, types.PermissionWrite),
 		},
 		aclKnown:                 true,
-		policyDocument:           &denyPublicWrite,
+		policyDocument:           &denyPutObject,
 		policyKnown:              true,
 		bucketPublicAccessBlock:  knownPublicAccessBlock(false, false, false, false),
 		accountPublicAccessBlock: knownPublicAccessBlock(false, false, false, false),
 	})
 
 	require.NoError(t, err)
-	require.NotNil(t, accessControl)
-	assert.Equal(t, boolPointer(false), accessControl.AllowPublicWrite)
-	assert.Equal(t, boolPointer(false), accessControl.AllowLogDeliveryWrite)
+	require.NotNil(t, partiallyBlocked)
+	assert.Equal(t, boolPointer(true), partiallyBlocked.AllowPublicWrite)
+	assert.Equal(t, boolPointer(true), partiallyBlocked.AllowLogDeliveryWrite)
+
+	denyAllWrites := `{
+		"Statement": [{
+			"Effect": "Deny",
+			"Principal": "*",
+			"Action": ["s3:PutObject", "s3:DeleteObject"],
+			"Resource": "arn:aws:s3:::example-bucket/*"
+		}]
+	}`
+	fullyBlocked, err := evaluateS3Access(accessEvaluationInput{
+		bucketARN: testBucketARN,
+		grants: []types.Grant{
+			aclGrant(allUsersGroup, types.PermissionWrite),
+			aclGrant(logDeliveryGroup, types.PermissionWrite),
+		},
+		aclKnown:                 true,
+		policyDocument:           &denyAllWrites,
+		policyKnown:              true,
+		bucketPublicAccessBlock:  knownPublicAccessBlock(false, false, false, false),
+		accountPublicAccessBlock: knownPublicAccessBlock(false, false, false, false),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, fullyBlocked)
+	assert.Equal(t, boolPointer(false), fullyBlocked.AllowPublicWrite)
+	assert.Equal(t, boolPointer(false), fullyBlocked.AllowLogDeliveryWrite)
 }
 
 func TestEvaluateS3AccessDoesNotApplyObjectDenyToBucketWideACLWrite(t *testing.T) {

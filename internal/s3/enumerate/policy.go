@@ -113,6 +113,9 @@ var aclWriteOperations = []func(string) policyOperation{
 	func(bucketARN string) policyOperation {
 		return policyOperation{action: "s3:PutObject", resource: bucketARN + "/*", resourceIsScope: true}
 	},
+	func(bucketARN string) policyOperation {
+		return policyOperation{action: "s3:DeleteObject", resource: bucketARN + "/*", resourceIsScope: true}
+	},
 }
 
 var aclReadACPOperations = []func(string) policyOperation{
