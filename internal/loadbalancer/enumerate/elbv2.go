@@ -98,9 +98,10 @@ func enumerateV2LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 
 			// Convert LoadBalancerType from AWS SDK
 			if lbType, err := convertAWSLoadBalancerType(lb.Type); err == nil {
-				configuration.LoadBalancerType = &lbType
+				configuration.LoadBalancerType = lbType
 			} else {
-				errorMessages = append(errorMessages, fmt.Sprintf("Failed to convert load balancer type for %s in region %s: %s", aws.ToString(lb.LoadBalancerName), region, err.Error()))
+				errorMessages = append(errorMessages, fmt.Sprintf("Failed to convert load balancer type for %s in region %s: %s", *lb.LoadBalancerArn, region, err.Error()))
+				continue
 			}
 
 			// Convert IP address type

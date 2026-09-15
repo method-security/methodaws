@@ -104,7 +104,7 @@ types:
       region: string
   LoadBalancerConfigurationInfo:
     properties:
-      loadBalancerType: optional<LoadBalancerType>
+      loadBalancerType: LoadBalancerType
       dnsName: optional<string>
       createdTime: optional<datetime>
       hostedZoneId: optional<string>

@@ -70,9 +70,8 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 			}
 
 			// Create configuration info
-			lbType := loadbalancerfern.LoadBalancerTypeClassic
 			configuration := &loadbalancerfern.LoadBalancerConfigurationInfo{
-				LoadBalancerType: &lbType,
+				LoadBalancerType: loadbalancerfern.LoadBalancerTypeClassic,
 				DnsName:          lb.DNSName,
 				CreatedTime:      lb.CreatedTime,
 				HostedZoneId:     lb.CanonicalHostedZoneNameID,
