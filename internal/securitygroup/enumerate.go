@@ -213,74 +213,12 @@ func convertAWSEC2SecurityGroupToFern(ctx context.Context, cfg aws.Config, awsSG
 	// Convert SecurityGroupRules directly to fernsecuritygroup.IpPermission
 	var fernPermissions []*fernsecuritygroup.RuleDetails
 	for _, rule := range detailedRules {
-		if rule.SecurityGroupRuleId == nil {
-			log.Warn("SecurityGroupRule missing ID", svc1log.SafeParam("rule", rule))
+		fernPerm, err := convertAWSEC2SecurityGroupRuleToFern(rule)
+		if err != nil {
+			log.Warn("Failed to convert SecurityGroupRule", svc1log.SafeParam("rule", rule), svc1log.Stacktrace(err))
+			errors = append(errors, err.Error())
 			continue
 		}
-
-		// Determine direction
-		var direction fernsecuritygroup.PermissionDirection
-		if rule.IsEgress != nil && *rule.IsEgress {
-			direction = fernsecuritygroup.PermissionDirectionEgress
-		} else {
-			direction = fernsecuritygroup.PermissionDirectionIngress
-		}
-
-		fernPerm := &fernsecuritygroup.RuleDetails{
-			Identification: &fernsecuritygroup.RuleIdentificationInfo{
-				Id: *rule.SecurityGroupRuleId,
-			},
-			Configuration: &fernsecuritygroup.RuleConfigurationInfo{
-				Direction:  direction,
-				IpProtocol: rule.IpProtocol,
-				Peer:       &fernsecuritygroup.RulePeerInfo{},
-			},
-		}
-
-		// Convert ports from int32 to int
-		if rule.FromPort != nil {
-			fromPort := int(*rule.FromPort)
-			fernPerm.Configuration.FromPort = &fromPort
-		}
-		if rule.ToPort != nil {
-			toPort := int(*rule.ToPort)
-			fernPerm.Configuration.ToPort = &toPort
-		}
-
-		// Extract description
-		if rule.Description != nil {
-			fernPerm.Configuration.Description = rule.Description
-		}
-
-		// Extract CIDR blocks - combine IPv4 and IPv6 into single list
-		var cidrs []string
-		if rule.CidrIpv4 != nil {
-			cidrs = append(cidrs, *rule.CidrIpv4)
-		}
-		if rule.CidrIpv6 != nil {
-			cidrs = append(cidrs, *rule.CidrIpv6)
-		}
-		if len(cidrs) > 0 {
-			fernPerm.Configuration.Peer.Cidrs = cidrs
-		}
-
-		// Extract referenced security group (missing bidirectional connection!)
-		if rule.ReferencedGroupInfo != nil && rule.ReferencedGroupInfo.GroupId != nil {
-			refSG := &fernsecuritygroup.ReferencedSecurityGroup{
-				GroupId: *rule.ReferencedGroupInfo.GroupId,
-			}
-			if rule.ReferencedGroupInfo.UserId != nil {
-				refSG.UserId = *rule.ReferencedGroupInfo.UserId
-			}
-			fernPerm.Configuration.Peer.ReferencedSecurityGroup = refSG
-		}
-
-		if len(cidrs) == 0 && fernPerm.Configuration.Peer.ReferencedSecurityGroup == nil {
-			log.Warn("SecurityGroupRule missing CIDR or referenced security group", svc1log.SafeParam("rule", fernPerm))
-			errors = append(errors, fmt.Sprintf("SecurityGroupRule missing CIDR or referenced security group: %v", fernPerm))
-			continue
-		}
-
 		fernPermissions = append(fernPermissions, fernPerm)
 	}
 
@@ -330,6 +268,58 @@ func convertAWSEC2SecurityGroupToFern(ctx context.Context, cfg aws.Config, awsSG
 	}
 
 	return fernSG, errors
+}
+
+func convertAWSEC2SecurityGroupRuleToFern(rule ec2types.SecurityGroupRule) (*fernsecuritygroup.RuleDetails, error) {
+	if rule.SecurityGroupRuleId == nil {
+		return nil, fmt.Errorf("SecurityGroupRule missing ID")
+	}
+
+	direction := fernsecuritygroup.PermissionDirectionIngress
+	if rule.IsEgress != nil && *rule.IsEgress {
+		direction = fernsecuritygroup.PermissionDirectionEgress
+	}
+
+	fernPerm := &fernsecuritygroup.RuleDetails{
+		Identification: &fernsecuritygroup.RuleIdentificationInfo{Id: *rule.SecurityGroupRuleId},
+		Configuration: &fernsecuritygroup.RuleConfigurationInfo{
+			Direction:  direction,
+			IpProtocol: rule.IpProtocol,
+			Peer:       &fernsecuritygroup.RulePeerInfo{},
+		},
+	}
+
+	if rule.FromPort != nil {
+		fromPort := int(*rule.FromPort)
+		fernPerm.Configuration.FromPort = &fromPort
+	}
+	if rule.ToPort != nil {
+		toPort := int(*rule.ToPort)
+		fernPerm.Configuration.ToPort = &toPort
+	}
+	fernPerm.Configuration.Description = rule.Description
+
+	var cidrs []string
+	if rule.CidrIpv4 != nil {
+		cidrs = append(cidrs, *rule.CidrIpv4)
+	}
+	if rule.CidrIpv6 != nil {
+		cidrs = append(cidrs, *rule.CidrIpv6)
+	}
+	fernPerm.Configuration.Peer.Cidrs = cidrs
+
+	if rule.ReferencedGroupInfo != nil && rule.ReferencedGroupInfo.GroupId != nil {
+		fernPerm.Configuration.Peer.ReferencedSecurityGroup = &fernsecuritygroup.ReferencedSecurityGroup{
+			GroupId: *rule.ReferencedGroupInfo.GroupId,
+			UserId:  rule.ReferencedGroupInfo.UserId,
+		}
+	}
+	fernPerm.Configuration.Peer.PrefixListId = rule.PrefixListId
+
+	if len(cidrs) == 0 && fernPerm.Configuration.Peer.ReferencedSecurityGroup == nil && rule.PrefixListId == nil {
+		return nil, fmt.Errorf("SecurityGroupRule %s missing peer", *rule.SecurityGroupRuleId)
+	}
+	return fernPerm, nil
 }
 
 // convertAWSRDSSecurityGroupToFern converts an AWS SDK RDS DB SecurityGroup to a Fern SecurityGroup

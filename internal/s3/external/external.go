@@ -3,7 +3,9 @@ package s3
 import (
 	// Standard
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	// Generated
@@ -16,11 +18,41 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
-// bucketExists checks if a bucket exists and is accessible
-func bucketExists(ctx context.Context, region string, bucketName string) (bool, error) {
+type headBucketAPI interface {
+	HeadBucket(context.Context, *s3.HeadBucketInput, ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
+}
+
+func locateBucketWithClient(ctx context.Context, client headBucketAPI, probeRegion, bucketName string) (bool, string, error) {
+	output, err := client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(bucketName)})
+	if err == nil {
+		if output != nil && output.BucketRegion != nil && *output.BucketRegion != "" {
+			return true, *output.BucketRegion, nil
+		}
+		return true, probeRegion, nil
+	}
+
+	var responseError *smithyhttp.ResponseError
+	if errors.As(err, &responseError) {
+		statusCode := responseError.HTTPStatusCode()
+		if statusCode == http.StatusNotFound {
+			return false, "", nil
+		}
+		bucketRegion := responseError.HTTPResponse().Header.Get("X-Amz-Bucket-Region")
+		if bucketRegion != "" && (statusCode == http.StatusMovedPermanently || statusCode == http.StatusTemporaryRedirect ||
+			statusCode == http.StatusBadRequest || statusCode == http.StatusForbidden) {
+			return true, bucketRegion, nil
+		}
+	}
+
+	return false, "", fmt.Errorf("head bucket %s: %w", bucketName, err)
+}
+
+// locateBucket checks whether a bucket exists and returns the region reported by S3.
+func locateBucket(ctx context.Context, probeRegion string, bucketName string) (bool, string, error) {
 	log := svc1log.FromContext(ctx)
 
 	// Create a custom AWS config with anonymous credentials
@@ -28,12 +60,12 @@ func bucketExists(ctx context.Context, region string, bucketName string) (bool, 
 	if err != nil {
 		log.Error("Failed to configure proxy for bucket existence check",
 			svc1log.SafeParam("bucketName", bucketName),
-			svc1log.SafeParam("region", region),
+			svc1log.SafeParam("region", probeRegion),
 			svc1log.Stacktrace(err))
-		return false, fmt.Errorf("error configuring proxy: %v", err)
+		return false, "", fmt.Errorf("error configuring proxy: %v", err)
 	}
 	loadOptions = append([]methodconfig.AWSLoadOption{
-		awsconfig.WithRegion(region),
+		awsconfig.WithRegion(probeRegion),
 		awsconfig.WithCredentialsProvider(aws.AnonymousCredentials{}),
 	}, loadOptions...)
 	cfg, err := awsconfig.LoadDefaultConfig(ctx,
@@ -42,44 +74,15 @@ func bucketExists(ctx context.Context, region string, bucketName string) (bool, 
 	if err != nil {
 		log.Error("Failed to load AWS config for bucket existence check",
 			svc1log.SafeParam("bucketName", bucketName),
-			svc1log.SafeParam("region", region),
+			svc1log.SafeParam("region", probeRegion),
 			svc1log.Stacktrace(err))
-		return false, fmt.Errorf("error loading AWS config: %v", err)
+		return false, "", fmt.Errorf("error loading AWS config: %v", err)
 	}
 
 	// Create an S3 client
 	client := s3.NewFromConfig(cfg)
 
-	// Try HeadBucket to check existence
-	_, err = client.HeadBucket(ctx, &s3.HeadBucketInput{
-		Bucket: aws.String(bucketName),
-	})
-
-	if err != nil {
-		errStr := err.Error()
-
-		if strings.Contains(errStr, "NotFound") || strings.Contains(errStr, "NoSuchBucket") {
-			log.Info("Bucket not found",
-				svc1log.SafeParam("bucketName", bucketName),
-				svc1log.SafeParam("region", region))
-			return false, nil
-		}
-
-		if strings.Contains(errStr, "Forbidden") || strings.Contains(errStr, "AccessDenied") {
-			log.Warn("Bucket exists but access is denied",
-				svc1log.SafeParam("bucketName", bucketName),
-				svc1log.SafeParam("region", region))
-			return true, nil // Bucket exists but we don't have access
-		}
-
-		log.Error("Error checking bucket existence",
-			svc1log.SafeParam("bucketName", bucketName),
-			svc1log.SafeParam("region", region),
-			svc1log.Stacktrace(err))
-		return false, fmt.Errorf("error checking bucket: %v", err)
-	}
-
-	return true, nil
+	return locateBucketWithClient(ctx, client, probeRegion, bucketName)
 }
 
 // listBucketContents attempts to list objects in the bucket
@@ -415,20 +418,20 @@ func EnumerateS3(ctx context.Context, config s3fern.S3ExternalConfig) s3fern.Ext
 	// Parse the bucket URL to get name and potentially region
 	bucketName, urlRegion := parseBucketURL(bucketURL)
 
-	// If we got a region from the URL, only check that region
-	// First try user input, then URL region, then all regions if no input or URL region
+	// Prefer explicit input and URL-derived regions. Otherwise, S3 reports the
+	// authoritative bucket region from a single request to its standard endpoint.
 	var regionsToCheck []string
 	if len(config.Regions) > 0 {
 		regionsToCheck = config.Regions
 	} else if urlRegion != "" {
 		regionsToCheck = []string{urlRegion}
 	} else {
-		regionsToCheck = utils.GetGeneralRegionsList()
+		regionsToCheck = []string{"us-east-1"}
 	}
 
 	bucketFound := false
 	for _, region := range regionsToCheck {
-		exists, err := bucketExists(ctx, region, bucketName)
+		exists, bucketRegion, err := locateBucket(ctx, region, bucketName)
 		if err != nil {
 			log.Warn("Error checking bucket in region",
 				svc1log.SafeParam("region", region),
@@ -438,10 +441,13 @@ func EnumerateS3(ctx context.Context, config s3fern.S3ExternalConfig) s3fern.Ext
 			continue
 		}
 		if exists {
+			if len(config.Regions) > 0 && !containsString(config.Regions, bucketRegion) {
+				continue
+			}
 			log.Info("Found bucket in region",
 				svc1log.SafeParam("bucketName", bucketName),
-				svc1log.SafeParam("region", region))
-			functionResult, functionErrors := externalS3Region(ctx, bucketURL, bucketName, region)
+				svc1log.SafeParam("region", bucketRegion))
+			functionResult, functionErrors := externalS3Region(ctx, bucketURL, bucketName, bucketRegion)
 			if functionResult != nil {
 				result = *functionResult
 			}
@@ -466,4 +472,13 @@ func EnumerateS3(ctx context.Context, config s3fern.S3ExternalConfig) s3fern.Ext
 		svc1log.SafeParam("totalErrors", len(errors)))
 
 	return report
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

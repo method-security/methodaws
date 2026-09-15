@@ -67,6 +67,14 @@ types:
       privateDnsName: optional<string>
       publicDnsName: optional<string>
 # Network Interface High level Structs
+  InstancePrivateIpAddress:
+    properties:
+      privateIpAddress: string
+      primary: optional<boolean>
+      privateDnsName: optional<string>
+      publicIpAddress: optional<string>
+      publicDnsName: optional<string>
+      publicIpOwnerId: optional<string>
   InstanceNetworkInterfaceIdentificationInfo:
     properties:
       id: string
@@ -80,6 +88,7 @@ types:
       macAddress: optional<string>
       privateIpAddress: optional<string>
       privateDnsName: optional<string>
+      privateIpAddresses: optional<list<InstancePrivateIpAddress>>
       sourceDestCheck: optional<boolean>
   InstanceNetworkInterfaceResourceInfo:
     properties:

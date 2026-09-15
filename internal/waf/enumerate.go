@@ -4,6 +4,7 @@ package waf
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	common "github.com/Method-Security/methodaws/generated/go/common"
@@ -151,6 +152,8 @@ func enumerateWAFForScope(
 		rules, defaultAction, errs := getRules(ctx, wafClient, awsScope, webACL.Id, webACL.Name)
 		if len(errs) != 0 {
 			errors = append(errors, errs...)
+		}
+		if defaultAction == nil {
 			continue
 		}
 
@@ -209,6 +212,11 @@ func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId
 		if rule.Name == nil {
 			log.Warn("WAF Rule Name is nil", svc1log.SafeParam("rule", rule))
 			errors = append(errors, "WAF Rule Name is nil")
+			continue
+		}
+		if rule.Statement == nil {
+			log.Warn("WAF Rule Statement is nil", svc1log.SafeParam("ruleName", *rule.Name))
+			errors = append(errors, fmt.Sprintf("WAF Rule %s Statement is nil", *rule.Name))
 			continue
 		}
 		ruleJSON, err := json.Marshal(rule)

@@ -83,7 +83,9 @@ func enumerateCloudFrontDistributions(ctx context.Context, awsConfig aws.Config,
 			distribution, fallbackErrs = transformDistributionSummaryToFern(ctx, awsConfig, dist, config.AccountId)
 			errors = append(errors, fallbackErrs...)
 		}
-		cloudFrontDistributions = append(cloudFrontDistributions, distribution)
+		if distribution != nil {
+			cloudFrontDistributions = append(cloudFrontDistributions, distribution)
+		}
 	}
 
 	return cloudFrontDistributions, errors

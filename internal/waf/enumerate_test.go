@@ -19,6 +19,7 @@ type stubWAFClient struct {
 	resourceListCalls int
 	resourceTypes     []types.ResourceType
 	resourceErrors    map[types.ResourceType]error
+	getOutput         *wafv2.GetWebACLOutput
 }
 
 func (s *stubWAFClient) ListWebACLs(
@@ -37,6 +38,9 @@ func (s *stubWAFClient) GetWebACL(
 	*wafv2.GetWebACLInput,
 	...func(*wafv2.Options),
 ) (*wafv2.GetWebACLOutput, error) {
+	if s.getOutput != nil {
+		return s.getOutput, nil
+	}
 	return &wafv2.GetWebACLOutput{WebACL: &types.WebACL{DefaultAction: &types.DefaultAction{Allow: &types.AllowAction{}}}}, nil
 }
 
@@ -138,4 +142,31 @@ func TestEnumerateCloudFrontWAFDoesNotListRegionalAssociations(t *testing.T) {
 	require.Len(t, wafs, 1)
 	assert.Equal(t, waffern.ScopeTypeCloudfront, wafs[0].Configuration.Scope)
 	assert.Zero(t, client.resourceListCalls)
+}
+
+func TestEnumerateWAFSkipsRuleWithMissingStatement(t *testing.T) {
+	t.Parallel()
+
+	client := &stubWAFClient{
+		listOutputs: []*wafv2.ListWebACLsOutput{{WebACLs: []types.WebACLSummary{{
+			ARN: aws.String("arn:aws:wafv2:us-east-1:123456789012:global/webacl/example/id"),
+			Id:  aws.String("id"), Name: aws.String("example"),
+		}}}},
+		getOutput: &wafv2.GetWebACLOutput{WebACL: &types.WebACL{
+			DefaultAction: &types.DefaultAction{Allow: &types.AllowAction{}},
+			Rules: []types.Rule{
+				{Name: aws.String("incomplete")},
+				{Name: aws.String("valid"), Statement: &types.Statement{ByteMatchStatement: &types.ByteMatchStatement{}}},
+			},
+		}},
+	}
+
+	wafs, errs := enumerateWAFForScope(
+		context.Background(), client, "us-east-1", types.ScopeCloudfront, waffern.ScopeTypeCloudfront,
+	)
+
+	require.Len(t, wafs, 1)
+	require.Len(t, wafs[0].Resources.Rules, 1)
+	assert.Equal(t, "valid", wafs[0].Resources.Rules[0].Identification.Name)
+	assert.Contains(t, errs, "WAF Rule incomplete Statement is nil")
 }

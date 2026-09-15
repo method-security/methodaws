@@ -7,6 +7,7 @@ import (
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
 	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -337,7 +338,10 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 		// Check if this is a VPC Link integration (private load balancer)
 		if integration.ConnectionType == types.ConnectionTypeVpcLink &&
 			integration.ConnectionId != nil {
-			backend := createV2LoadBalancerBackend(integration, region)
+			backend, err := createV2VpcLinkBackend(integration)
+			if err != nil {
+				return nil, err
+			}
 			return &apigatewayfern.Integration{Type: "vpc_link", VpcLink: &apigatewayfern.VpcLinkIntegration{
 				Backend: backend,
 			}}, nil
@@ -370,7 +374,10 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 		// Check if this is a VPC Link integration (private load balancer)
 		if integration.ConnectionType == types.ConnectionTypeVpcLink &&
 			integration.ConnectionId != nil {
-			backend := createV2LoadBalancerBackend(integration, region)
+			backend, err := createV2VpcLinkBackend(integration)
+			if err != nil {
+				return nil, err
+			}
 			return &apigatewayfern.Integration{Type: "vpc_link", VpcLink: &apigatewayfern.VpcLinkIntegration{
 				Backend: backend,
 			}}, nil
@@ -408,19 +415,50 @@ func convertV2Integration(integration *apigatewayv2.GetIntegrationOutput, region
 	}
 }
 
-// createV2LoadBalancerBackend creates a LoadBalancerBackend from V2 integration details
-func createV2LoadBalancerBackend(integration *apigatewayv2.GetIntegrationOutput, region string) *apigatewayfern.LoadBalancerBackend {
+func createV2VpcLinkBackend(integration *apigatewayv2.GetIntegrationOutput) (*apigatewayfern.VpcLinkBackend, error) {
 	uri := aws.ToString(integration.IntegrationUri)
 	connectionID := aws.ToString(integration.ConnectionId)
+	if uri == "" || connectionID == "" {
+		return nil, fmt.Errorf("VPC Link integration missing URI or connection ID")
+	}
 
-	// Extract DNS name from URI
-	dnsName := extractDNSNameFromURI(uri)
+	resourceARN := strings.SplitN(uri, "?", 2)[0]
+	parsed, err := awsarn.Parse(resourceARN)
+	if err != nil {
+		return nil, fmt.Errorf("parse VPC Link integration URI %q: %w", uri, err)
+	}
 
-	return &apigatewayfern.LoadBalancerBackend{
-		Uri:             uri,
-		VpcLinkId:       connectionID,
-		LoadBalancerArn: "", // Would need additional API call to get actual ARN
-		DnsName:         &dnsName,
+	switch parsed.Service {
+	case "elasticloadbalancing":
+		parts := strings.Split(parsed.Resource, "/")
+		if len(parts) != 5 || parts[0] != "listener" || (parts[1] != "app" && parts[1] != "net") {
+			return nil, fmt.Errorf("VPC Link integration URI is not an ALB or NLB listener ARN: %s", uri)
+		}
+		loadBalancerARN := parsed
+		loadBalancerARN.Resource = strings.Join(append([]string{"loadbalancer"}, parts[1:4]...), "/")
+		listenerARN := parsed.String()
+		loadBalancerARNString := loadBalancerARN.String()
+		return &apigatewayfern.VpcLinkBackend{
+			Type: "load_balancer",
+			LoadBalancer: &apigatewayfern.LoadBalancerBackend{
+				Uri:              uri,
+				VpcLinkId:        connectionID,
+				LoadBalancerArn:  loadBalancerARNString,
+				LoadBalancerArns: []string{loadBalancerARNString},
+				ListenerArn:      &listenerARN,
+			},
+		}, nil
+	case "servicediscovery":
+		return &apigatewayfern.VpcLinkBackend{
+			Type: "service_discovery",
+			ServiceDiscovery: &apigatewayfern.ServiceDiscoveryBackend{
+				Uri:        uri,
+				VpcLinkId:  connectionID,
+				ServiceArn: resourceARN,
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported VPC Link integration URI service %q", parsed.Service)
 	}
 }
 

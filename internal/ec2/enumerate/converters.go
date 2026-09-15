@@ -2,6 +2,7 @@ package enumerate
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/Method-Security/methodaws/generated/go/common"
@@ -200,19 +201,39 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 		}
 
 		// Create network interface with nested structure
+		privateIPAddresses := make([]*ec2.InstancePrivateIpAddress, 0, len(ni.PrivateIpAddresses))
+		for _, privateIP := range ni.PrivateIpAddresses {
+			if privateIP.PrivateIpAddress == nil {
+				errors = append(errors, fmt.Sprintf("Network interface %s has a private IP assignment without an address", *ni.NetworkInterfaceId))
+				continue
+			}
+			converted := &ec2.InstancePrivateIpAddress{
+				PrivateIpAddress: *privateIP.PrivateIpAddress,
+				Primary:          privateIP.Primary,
+				PrivateDnsName:   privateIP.PrivateDnsName,
+			}
+			if privateIP.Association != nil {
+				converted.PublicIpAddress = privateIP.Association.PublicIp
+				converted.PublicDnsName = privateIP.Association.PublicDnsName
+				converted.PublicIpOwnerId = privateIP.Association.IpOwnerId
+			}
+			privateIPAddresses = append(privateIPAddresses, converted)
+		}
+
 		fernNI := &ec2.InstanceNetworkInterface{
 			Identification: &ec2.InstanceNetworkInterfaceIdentificationInfo{
 				Id:     *ni.NetworkInterfaceId,
 				Region: region,
 			},
 			Configuration: &ec2.InstanceNetworkInterfaceConfigurationInfo{
-				Description:      ni.Description,
-				OwnerId:          ni.OwnerId,
-				Status:           status,
-				MacAddress:       ni.MacAddress,
-				PrivateIpAddress: ni.PrivateIpAddress,
-				PrivateDnsName:   ni.PrivateDnsName,
-				SourceDestCheck:  ni.SourceDestCheck,
+				Description:        ni.Description,
+				OwnerId:            ni.OwnerId,
+				Status:             status,
+				MacAddress:         ni.MacAddress,
+				PrivateIpAddress:   ni.PrivateIpAddress,
+				PrivateDnsName:     ni.PrivateDnsName,
+				PrivateIpAddresses: privateIPAddresses,
+				SourceDestCheck:    ni.SourceDestCheck,
 			},
 			Resources: &ec2.InstanceNetworkInterfaceResourceInfo{
 				Vpc: vpcReference,

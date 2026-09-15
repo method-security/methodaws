@@ -165,3 +165,37 @@ func TestHTTPAPIPaginationHelpersRejectNilResponses(t *testing.T) {
 	_, err = getAllHTTPAPIMappings(context.Background(), client, "example.com")
 	require.EqualError(t, err, "GetApiMappings returned no response for domain example.com")
 }
+
+func TestConvertV2VpcLinkDerivesLoadBalancerFromListener(t *testing.T) {
+	t.Parallel()
+
+	listenerARN := "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/example/abc/def"
+	backend, err := createV2VpcLinkBackend(&apigatewayv2.GetIntegrationOutput{
+		ConnectionId:   aws.String("vpclink-123"),
+		IntegrationUri: aws.String(listenerARN),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, backend.LoadBalancer)
+	assert.Equal(t, listenerARN, aws.ToString(backend.LoadBalancer.ListenerArn))
+	assert.Equal(t,
+		"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/example/abc",
+		backend.LoadBalancer.LoadBalancerArn,
+	)
+	assert.Nil(t, backend.LoadBalancer.DnsName)
+}
+
+func TestConvertV2VpcLinkPreservesCloudMapService(t *testing.T) {
+	t.Parallel()
+
+	serviceARN := "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-example"
+	backend, err := createV2VpcLinkBackend(&apigatewayv2.GetIntegrationOutput{
+		ConnectionId:   aws.String("vpclink-123"),
+		IntegrationUri: aws.String(serviceARN + "?stage=prod"),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, backend.ServiceDiscovery)
+	assert.Equal(t, serviceARN, backend.ServiceDiscovery.ServiceArn)
+	assert.Equal(t, serviceARN+"?stage=prod", backend.ServiceDiscovery.Uri)
+}

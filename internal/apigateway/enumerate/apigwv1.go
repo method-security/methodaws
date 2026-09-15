@@ -204,6 +204,7 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 	log := svc1log.FromContext(ctx)
 	var routes []*apigatewayfern.Route
 	var errors []string
+	vpcLinkTargets := make(map[string][]string)
 
 	// Paginate through all resources
 	var allResources []types.Resource
@@ -256,7 +257,7 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 			// Convert integration if present
 			var integration *apigatewayfern.Integration
 			if method.MethodIntegration != nil {
-				integ, err := convertV1Integration(method.MethodIntegration, region)
+				integ, err := convertV1Integration(ctx, client, vpcLinkTargets, method.MethodIntegration, region)
 				if err != nil {
 					resourcePath := "unknown"
 					if resource.Path != nil {
@@ -340,11 +341,30 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 
 // convertV1Integration converts AWS API Gateway integration to Fern Integration with backend structure
 // Returns detailed error messages for debugging integration conversion failures
-func convertV1Integration(methodIntegration *types.Integration, region string) (*apigatewayfern.Integration, error) {
+type getVpcLinkAPI interface {
+	GetVpcLink(context.Context, *apigateway.GetVpcLinkInput, ...func(*apigateway.Options)) (*apigateway.GetVpcLinkOutput, error)
+}
+
+func convertV1Integration(
+	ctx context.Context,
+	client getVpcLinkAPI,
+	vpcLinkTargets map[string][]string,
+	methodIntegration *types.Integration,
+	region string,
+) (*apigatewayfern.Integration, error) {
 	switch methodIntegration.Type {
 	case types.IntegrationTypeHttp:
 		if methodIntegration.Uri == nil {
 			return nil, fmt.Errorf("HTTP integration missing URI")
+		}
+		if isVpcLinkIntegration(methodIntegration) {
+			backend, err := createV1LoadBalancerBackend(ctx, client, vpcLinkTargets, methodIntegration)
+			if err != nil {
+				return nil, err
+			}
+			return &apigatewayfern.Integration{Type: "vpc_link", VpcLink: &apigatewayfern.VpcLinkIntegration{
+				Backend: &apigatewayfern.VpcLinkBackend{Type: "load_balancer", LoadBalancer: backend},
+			}}, nil
 		}
 
 		backend := &apigatewayfern.HttpBackend{
@@ -378,9 +398,12 @@ func convertV1Integration(methodIntegration *types.Integration, region string) (
 
 		// Check if this is a VPC Link integration (private load balancer)
 		if isVpcLinkIntegration(methodIntegration) {
-			backend := createLoadBalancerBackend(methodIntegration, region)
+			backend, err := createV1LoadBalancerBackend(ctx, client, vpcLinkTargets, methodIntegration)
+			if err != nil {
+				return nil, err
+			}
 			return &apigatewayfern.Integration{Type: "vpc_link", VpcLink: &apigatewayfern.VpcLinkIntegration{
-				Backend: backend,
+				Backend: &apigatewayfern.VpcLinkBackend{Type: "load_balancer", LoadBalancer: backend},
 			}}, nil
 		}
 
@@ -435,21 +458,35 @@ func isVpcLinkIntegration(integration *types.Integration) bool {
 		integration.ConnectionId != nil
 }
 
-// createLoadBalancerBackend creates a LoadBalancerBackend from integration details
-func createLoadBalancerBackend(integration *types.Integration, region string) *apigatewayfern.LoadBalancerBackend {
+func createV1LoadBalancerBackend(
+	ctx context.Context,
+	client getVpcLinkAPI,
+	vpcLinkTargets map[string][]string,
+	integration *types.Integration,
+) (*apigatewayfern.LoadBalancerBackend, error) {
 	if integration.Uri == nil || integration.ConnectionId == nil {
-		return nil
+		return nil, fmt.Errorf("VPC Link integration missing URI or connection ID")
 	}
 
-	// Extract DNS name from URI
-	dnsName := extractDNSNameFromURI(*integration.Uri)
+	targetARNs, ok := vpcLinkTargets[*integration.ConnectionId]
+	if !ok {
+		output, err := client.GetVpcLink(ctx, &apigateway.GetVpcLinkInput{VpcLinkId: integration.ConnectionId})
+		if err != nil {
+			return nil, fmt.Errorf("get VPC Link %s: %w", *integration.ConnectionId, err)
+		}
+		if output == nil || len(output.TargetArns) == 0 {
+			return nil, fmt.Errorf("VPC Link %s returned no target ARNs", *integration.ConnectionId)
+		}
+		targetARNs = output.TargetArns
+		vpcLinkTargets[*integration.ConnectionId] = targetARNs
+	}
 
 	return &apigatewayfern.LoadBalancerBackend{
-		Uri:             *integration.Uri,
-		VpcLinkId:       *integration.ConnectionId,
-		LoadBalancerArn: "", // Would need additional API call to get actual ARN
-		DnsName:         &dnsName,
-	}
+		Uri:              *integration.Uri,
+		VpcLinkId:        *integration.ConnectionId,
+		LoadBalancerArn:  targetARNs[0],
+		LoadBalancerArns: targetARNs,
+	}, nil
 }
 
 // getEndpointConfiguration converts AWS endpoint configuration to Fern EndpointType

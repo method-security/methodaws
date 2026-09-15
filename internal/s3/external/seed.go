@@ -20,10 +20,6 @@ var permutationSuffixes = []string{
 	"-releases",
 }
 
-// seedProbeRegions is a bounded default region set used for seed discovery when
-// no explicit regions are configured, keeping the number of probe calls in check.
-var seedProbeRegions = []string{"us-east-1", "us-west-1", "us-west-2", "eu-west-1", "eu-central-1", "ap-southeast-1"}
-
 const (
 	defaultMaxCandidates = 50
 	maxCandidatesCap     = 500
@@ -164,12 +160,12 @@ func enumerateBySeed(ctx context.Context, config s3fern.S3ExternalConfig) (*s3fe
 
 	regionsToCheck := config.Regions
 	if len(regionsToCheck) == 0 {
-		regionsToCheck = seedProbeRegions
+		regionsToCheck = []string{"us-east-1"}
 	}
 
 	for _, name := range candidates {
 		for _, region := range regionsToCheck {
-			exists, err := bucketExists(ctx, region, name)
+			exists, bucketRegion, err := locateBucket(ctx, region, name)
 			if err != nil {
 				// Probe errors are non-fatal during discovery (try the next region),
 				// but they must be surfaced so a region/API failure is distinguishable
@@ -184,8 +180,11 @@ func enumerateBySeed(ctx context.Context, config s3fern.S3ExternalConfig) (*s3fe
 			if !exists {
 				continue
 			}
+			if len(config.Regions) > 0 && !containsString(config.Regions, bucketRegion) {
+				break
+			}
 			bucketURL := fmt.Sprintf("https://%s.s3.amazonaws.com", name)
-			functionResult, functionErrors := externalS3Region(ctx, bucketURL, name, region)
+			functionResult, functionErrors := externalS3Region(ctx, bucketURL, name, bucketRegion)
 			if functionResult != nil {
 				result.ExternalBuckets = append(result.ExternalBuckets, functionResult.ExternalBuckets...)
 			}
