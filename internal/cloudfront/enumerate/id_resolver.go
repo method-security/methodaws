@@ -18,21 +18,39 @@ import (
 
 // Only recognized AWS endpoint forms can produce backend identities. Custom DNS
 // names remain unlinked; substrings such as "ec2-" are not evidence of ownership.
-const originRegionPattern = `[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+`
+const originRegionPattern = `[a-z]{2,}(?:-[a-z0-9]+)+-[0-9]+`
 
 var (
-	s3OriginDomain         = regexp.MustCompile(`^([a-z0-9][a-z0-9.-]*[a-z0-9])\.s3(?:[.-]` + originRegionPattern + `|-website[.-]` + originRegionPattern + `)?\.amazonaws\.com$`)
-	elbOriginDomain        = regexp.MustCompile(`^[a-z0-9-]+\.(` + originRegionPattern + `)\.elb\.amazonaws\.com$`)
-	nlbOriginDomain        = regexp.MustCompile(`^[a-z0-9-]+\.elb\.(` + originRegionPattern + `)\.amazonaws\.com$`)
-	ec2OriginDomain        = regexp.MustCompile(`^ec2-[0-9]+-[0-9]+-[0-9]+-[0-9]+\.(` + originRegionPattern + `)\.compute\.amazonaws\.com$`)
+	s3OriginDomain         = regexp.MustCompile(`^([a-z0-9][a-z0-9.-]*[a-z0-9])\.s3(?:(?:-website[.-]|[.-])(` + originRegionPattern + `))?\.([a-z0-9.-]+)$`)
+	elbOriginDomain        = regexp.MustCompile(`^[a-z0-9-]+\.(` + originRegionPattern + `)\.elb\.([a-z0-9.-]+)$`)
+	nlbOriginDomain        = regexp.MustCompile(`^[a-z0-9-]+\.elb\.(` + originRegionPattern + `)\.([a-z0-9.-]+)$`)
+	ec2OriginDomain        = regexp.MustCompile(`^ec2-[0-9]+-[0-9]+-[0-9]+-[0-9]+\.(` + originRegionPattern + `)\.compute\.([a-z0-9.-]+)$`)
 	ec2LegacyOriginDomain  = regexp.MustCompile(`^ec2-[0-9]+-[0-9]+-[0-9]+-[0-9]+\.compute-1\.amazonaws\.com$`)
-	apiGatewayOriginDomain = regexp.MustCompile(`^([a-z0-9]+)\.execute-api\.(` + originRegionPattern + `)\.amazonaws\.com$`)
+	apiGatewayOriginDomain = regexp.MustCompile(`^([a-z0-9]+)\.execute-api\.(` + originRegionPattern + `)\.([a-z0-9.-]+)$`)
 )
+
+// Regional patterns capture region and DNS suffix last. Regionless S3 uses the
+// commercial global endpoint; regional endpoints must match their partition.
+func matchOriginDomain(pattern *regexp.Regexp, domainName string) []string {
+	matches := pattern.FindStringSubmatch(domainName)
+	if len(matches) < 3 {
+		return nil
+	}
+	region := matches[len(matches)-2]
+	if region == "" {
+		region = "us-east-1"
+	}
+	suffix, err := utils.AWSDNSSuffixForRegion(region)
+	if err != nil || matches[len(matches)-1] != suffix {
+		return nil
+	}
+	return matches
+}
 
 func resolveOriginBackend(ctx context.Context, awsConfig aws.Config, domainName string, originType cloudfrontfern.CloudFrontResourceType, accountID string) (*cloudfrontfern.CloudFrontOriginBackend, error) {
 	switch originType {
 	case cloudfrontfern.CloudFrontResourceTypeS3:
-		matches := s3OriginDomain.FindStringSubmatch(domainName)
+		matches := matchOriginDomain(s3OriginDomain, domainName)
 		if len(matches) < 2 {
 			return nil, fmt.Errorf("invalid S3 origin domain: %s", domainName)
 		}
@@ -54,7 +72,7 @@ func resolveOriginBackend(ctx context.Context, awsConfig aws.Config, domainName 
 			Type: "ec2", Ec2: &cloudfrontfern.Ec2OriginBackend{Arn: instanceARN},
 		}, nil
 	case cloudfrontfern.CloudFrontResourceTypeApiGateway:
-		matches := apiGatewayOriginDomain.FindStringSubmatch(domainName)
+		matches := matchOriginDomain(apiGatewayOriginDomain, domainName)
 		if len(matches) < 3 {
 			return nil, fmt.Errorf("invalid API Gateway origin domain: %s", domainName)
 		}
@@ -68,9 +86,9 @@ func resolveOriginBackend(ctx context.Context, awsConfig aws.Config, domainName 
 }
 
 func resolveLoadBalancer(ctx context.Context, awsConfig aws.Config, domainName string) (*common.LoadBalancerReference, error) {
-	matches := elbOriginDomain.FindStringSubmatch(domainName)
+	matches := matchOriginDomain(elbOriginDomain, domainName)
 	if len(matches) < 2 {
-		matches = nlbOriginDomain.FindStringSubmatch(domainName)
+		matches = matchOriginDomain(nlbOriginDomain, domainName)
 	}
 	if len(matches) < 2 {
 		return nil, fmt.Errorf("invalid load balancer origin domain: %s", domainName)
@@ -110,7 +128,7 @@ func resolveLoadBalancer(ctx context.Context, awsConfig aws.Config, domainName s
 }
 
 func resolveEC2InstanceARN(ctx context.Context, awsConfig aws.Config, domainName, accountID string) (string, error) {
-	matches := ec2OriginDomain.FindStringSubmatch(domainName)
+	matches := matchOriginDomain(ec2OriginDomain, domainName)
 	if len(matches) >= 2 {
 		awsConfig.Region = matches[1]
 	} else if ec2LegacyOriginDomain.MatchString(domainName) {

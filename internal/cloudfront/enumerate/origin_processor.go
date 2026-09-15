@@ -12,13 +12,13 @@ import (
 
 func classifyOriginType(domainName string) cloudfrontfern.CloudFrontResourceType {
 	switch {
-	case s3OriginDomain.MatchString(domainName):
+	case matchOriginDomain(s3OriginDomain, domainName) != nil:
 		return cloudfrontfern.CloudFrontResourceTypeS3
-	case elbOriginDomain.MatchString(domainName), nlbOriginDomain.MatchString(domainName):
+	case matchOriginDomain(elbOriginDomain, domainName) != nil, matchOriginDomain(nlbOriginDomain, domainName) != nil:
 		return cloudfrontfern.CloudFrontResourceTypeLoadBalancer
-	case ec2OriginDomain.MatchString(domainName), ec2LegacyOriginDomain.MatchString(domainName):
+	case matchOriginDomain(ec2OriginDomain, domainName) != nil, ec2LegacyOriginDomain.MatchString(domainName):
 		return cloudfrontfern.CloudFrontResourceTypeEc2
-	case apiGatewayOriginDomain.MatchString(domainName):
+	case matchOriginDomain(apiGatewayOriginDomain, domainName) != nil:
 		return cloudfrontfern.CloudFrontResourceTypeApiGateway
 	default:
 		return cloudfrontfern.CloudFrontResourceTypeUnknown
