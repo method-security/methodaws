@@ -10,8 +10,8 @@ types:
 # Supporting Types
   Endpoint:
     properties:
-      address: optional<string>
-      port: optional<integer>
+      address: string
+      port: integer
       hostedZoneId: optional<string>
   StorageConfig:
     properties:
@@ -48,7 +48,8 @@ types:
   RdsIdentificationInfo:
     properties:
       arn: string
-      id: optional<string>
+      # DBInstanceIdentifier, scoped by the enclosing ARN's account and region.
+      id: string
       name: optional<string>
       region: string
   RdsConfigurationInfo:
@@ -58,9 +59,13 @@ types:
       # Database Configuration
       engine: optional<string>
       engineVersion: optional<string>
+      # Initial DBName reported by AWS, not the instance name or a database inventory.
+      databaseName: optional<string>
       masterUsername: optional<string>
       # Network & Availability
       endpoint: optional<Endpoint>
+      # Configured DB subnet-group members, not the instance's active subnet attachments.
+      dbSubnetGroupSubnetIds: optional<list<string>>
       availabilityZone: optional<string>
       multiAZ: optional<boolean>
       publiclyAccessible: optional<boolean>

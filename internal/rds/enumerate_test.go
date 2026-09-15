@@ -12,5 +12,5 @@ func TestConvertDBInstanceRequiresCompleteIdentity(t *testing.T) {
 	instance, errs := convertAWSDBInstanceToFern(types.DBInstance{DBInstanceIdentifier: aws.String("database")}, "us-east-1")
 
 	require.Nil(t, instance)
-	require.Equal(t, []string{"RDS DB instance identifier or ARN is missing"}, errs)
+	require.Equal(t, []string{"RDS DB instance identifier, ARN, or region is missing"}, errs)
 }

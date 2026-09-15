@@ -4,12 +4,15 @@ package rds
 import (
 	// Standard
 	"context"
+	"fmt"
+
 	// Generated
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	rdsfern "github.com/Method-Security/methodaws/generated/go/rds"
 
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/rds/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -85,18 +88,13 @@ func enumerateRDSForRegion(ctx context.Context, awsConfig aws.Config, region str
 
 	var rdsInstances []*rdsfern.RdsInstance
 	for _, instance := range instances {
-		// Check for required DBInstanceIdentifier
-		if instance.DBInstanceArn == nil {
-			log.Warn("RDS DB Instance ARN is nil", svc1log.SafeParam("instance", instance))
-			errors = append(errors, "RDS DB Instance ARN is nil")
-			continue
-		}
-
 		rdsInstance, errs := convertAWSDBInstanceToFern(instance, region)
 		if rdsInstance != nil {
 			rdsInstances = append(rdsInstances, rdsInstance)
 		}
-		errors = append(errors, errs...)
+		for _, err := range errs {
+			errors = append(errors, fmt.Sprintf("RDS instance %q (%s) in region %s: %s", aws.ToString(instance.DBInstanceIdentifier), aws.ToString(instance.DBInstanceArn), region, err))
+		}
 	}
 
 	return rdsInstances, errors
@@ -124,15 +122,25 @@ func listRDSInstances(ctx context.Context, rdsClient *rds.Client) ([]types.DBIns
 func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsfern.RdsInstance, []string) {
 	errors := []string{}
 
+	// DescribeDBInstances also returns these non-RDS services.
+	if aws.ToString(instance.Engine) == "docdb" || aws.ToString(instance.Engine) == "neptune" {
+		return nil, nil
+	}
+
 	// Core Identity & Status (required field)
-	if instance.DBInstanceIdentifier == nil || instance.DBInstanceArn == nil {
-		return nil, []string{"RDS DB instance identifier or ARN is missing"}
+	if aws.ToString(instance.DBInstanceIdentifier) == "" || aws.ToString(instance.DBInstanceArn) == "" || region == "" {
+		return nil, []string{"RDS DB instance identifier, ARN, or region is missing"}
+	}
+	instanceARN, err := arn.Parse(*instance.DBInstanceArn)
+	if err != nil || instanceARN.Partition == "" || instanceARN.AccountID == "" || instanceARN.Service != "rds" ||
+		instanceARN.Region != region || instanceARN.Resource != "db:"+*instance.DBInstanceIdentifier {
+		return nil, []string{fmt.Sprintf("invalid or mismatched RDS DB instance ARN %q", *instance.DBInstanceArn)}
 	}
 	dbInstance := &rdsfern.RdsInstance{
 		Identification: &rdsfern.RdsIdentificationInfo{
 			Arn:    *instance.DBInstanceArn,
-			Id:     instance.DBInstanceIdentifier,
-			Name:   instance.DBName,
+			Id:     *instance.DBInstanceIdentifier,
+			Name:   instance.DBInstanceIdentifier,
 			Region: region,
 		},
 		Configuration: &rdsfern.RdsConfigurationInfo{
@@ -140,6 +148,7 @@ func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsf
 			Class:              instance.DBInstanceClass,
 			Engine:             instance.Engine,
 			EngineVersion:      instance.EngineVersion,
+			DatabaseName:       instance.DBName,
 			MasterUsername:     instance.MasterUsername,
 			AvailabilityZone:   instance.AvailabilityZone,
 			MultiAz:            instance.MultiAZ,
@@ -150,34 +159,36 @@ func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsf
 
 	// Network & Availability
 	if instance.Endpoint != nil {
-		var port *int
-		if instance.Endpoint.Port != nil {
-			val := int(*instance.Endpoint.Port)
-			port = &val
-		}
-		dbInstance.Configuration.Endpoint = &rdsfern.Endpoint{
-			Address:      instance.Endpoint.Address,
-			Port:         port,
-			HostedZoneId: instance.Endpoint.HostedZoneId,
+		if aws.ToString(instance.Endpoint.Address) == "" || instance.Endpoint.Port == nil || *instance.Endpoint.Port < 1 || *instance.Endpoint.Port > 65535 {
+			errors = append(errors, "DB endpoint is missing its address or a valid port")
+		} else {
+			dbInstance.Configuration.Endpoint = &rdsfern.Endpoint{
+				Address:      *instance.Endpoint.Address,
+				Port:         int(*instance.Endpoint.Port),
+				HostedZoneId: instance.Endpoint.HostedZoneId,
+			}
 		}
 	}
 
 	// VPC References (minimal VPC info to avoid duplication with VPC enumeration)
-	if instance.DBSubnetGroup != nil && instance.DBSubnetGroup.VpcId != nil {
-		// Get subnet IDs from the subnet group
+	if instance.DBSubnetGroup != nil {
 		var subnetIds []string
 		for _, subnet := range instance.DBSubnetGroup.Subnets {
-			if subnet.SubnetIdentifier != nil {
+			if aws.ToString(subnet.SubnetIdentifier) != "" {
 				subnetIds = append(subnetIds, *subnet.SubnetIdentifier)
+			} else {
+				errors = append(errors, "DB subnet group has a subnet without an ID")
 			}
 		}
+		dbInstance.Configuration.DbSubnetGroupSubnetIds = subnetIds
 
-		if instance.DBSubnetGroup.VpcId != nil {
+		if aws.ToString(instance.DBSubnetGroup.VpcId) != "" {
 			dbInstance.Resources.Vpc = &common.VpcReference{
-				Id:        *instance.DBSubnetGroup.VpcId,
-				Region:    region,
-				SubnetIds: subnetIds,
+				Id:     *instance.DBSubnetGroup.VpcId,
+				Region: region,
 			}
+		} else {
+			errors = append(errors, "DB subnet group is missing its VPC ID")
 		}
 	}
 
@@ -211,11 +222,13 @@ func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsf
 	// Security Configuration - create SecurityGroupReference objects
 	var securityGroups []*common.SecurityGroupReference
 	for _, sg := range instance.VpcSecurityGroups {
-		if sg.VpcSecurityGroupId != nil {
+		if aws.ToString(sg.VpcSecurityGroupId) != "" {
 			securityGroups = append(securityGroups, &common.SecurityGroupReference{
 				Id:     *sg.VpcSecurityGroupId,
 				Region: region,
 			})
+		} else {
+			errors = append(errors, "VPC security group membership is missing its ID")
 		}
 	}
 	dbInstance.Configuration.Security = &rdsfern.SecurityConfig{
