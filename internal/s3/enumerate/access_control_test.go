@@ -28,6 +28,13 @@ func TestEvaluateS3AccessKnownPrivateBucket(t *testing.T) {
 	assert.False(t, aws.ToBool(accessControl.AllowAuthenticatedUsersWrite))
 	assert.False(t, aws.ToBool(accessControl.BlockPublicAcls))
 	assert.False(t, aws.ToBool(accessControl.RestrictPublicBuckets))
+	require.NotNil(t, accessControl.PublicAccessBlock)
+	require.NotNil(t, accessControl.PublicAccessBlock.Bucket)
+	require.NotNil(t, accessControl.PublicAccessBlock.Account)
+	require.NotNil(t, accessControl.PublicAccessBlock.Effective)
+	assert.False(t, aws.ToBool(accessControl.PublicAccessBlock.Bucket.BlockPublicAcls))
+	assert.False(t, aws.ToBool(accessControl.PublicAccessBlock.Account.BlockPublicAcls))
+	assert.False(t, aws.ToBool(accessControl.PublicAccessBlock.Effective.BlockPublicAcls))
 }
 
 func TestEvaluateACLPermissionsRecognizesAWSGroupGrants(t *testing.T) {
@@ -122,6 +129,51 @@ func TestEvaluateS3AccessAppliesPublicAccessBlocks(t *testing.T) {
 			assert.Equal(t, test.restrictPolicy, accessControl.RestrictPublicBuckets)
 		})
 	}
+}
+
+func TestEvaluateS3AccessPreservesPublicAccessBlockLevels(t *testing.T) {
+	t.Parallel()
+
+	accessControl, err := evaluateS3Access(accessEvaluationInput{
+		bucketARN:                testBucketARN,
+		aclKnown:                 true,
+		policyKnown:              true,
+		bucketPublicAccessBlock:  knownPublicAccessBlock(true, false, false, false),
+		accountPublicAccessBlock: knownPublicAccessBlock(false, true, false, true),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, accessControl)
+	require.NotNil(t, accessControl.PublicAccessBlock)
+	require.NotNil(t, accessControl.PublicAccessBlock.Bucket)
+	require.NotNil(t, accessControl.PublicAccessBlock.Account)
+	require.NotNil(t, accessControl.PublicAccessBlock.Effective)
+	assert.True(t, aws.ToBool(accessControl.PublicAccessBlock.Bucket.BlockPublicAcls))
+	assert.False(t, aws.ToBool(accessControl.PublicAccessBlock.Bucket.IgnorePublicAcls))
+	assert.False(t, aws.ToBool(accessControl.PublicAccessBlock.Account.BlockPublicAcls))
+	assert.True(t, aws.ToBool(accessControl.PublicAccessBlock.Account.IgnorePublicAcls))
+	assert.True(t, aws.ToBool(accessControl.PublicAccessBlock.Account.RestrictPublicBuckets))
+	assert.True(t, aws.ToBool(accessControl.PublicAccessBlock.Effective.BlockPublicAcls))
+	assert.True(t, aws.ToBool(accessControl.PublicAccessBlock.Effective.IgnorePublicAcls))
+	assert.True(t, aws.ToBool(accessControl.PublicAccessBlock.Effective.RestrictPublicBuckets))
+}
+
+func TestEvaluateS3AccessLeavesUnavailablePublicAccessBlockLevelUnset(t *testing.T) {
+	t.Parallel()
+
+	accessControl, err := evaluateS3Access(accessEvaluationInput{
+		bucketARN:               testBucketARN,
+		aclKnown:                true,
+		policyKnown:             true,
+		bucketPublicAccessBlock: knownPublicAccessBlock(false, false, false, false),
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, accessControl)
+	require.NotNil(t, accessControl.PublicAccessBlock)
+	require.NotNil(t, accessControl.PublicAccessBlock.Bucket)
+	assert.Nil(t, accessControl.PublicAccessBlock.Account)
+	assert.Nil(t, accessControl.PublicAccessBlock.Effective)
 }
 
 func TestEvaluateS3AccessRequiresEveryACLReadOperationToBeDenied(t *testing.T) {
@@ -279,7 +331,11 @@ func TestEvaluateS3AccessLeavesUncertainResultsUnset(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		assert.Nil(t, accessControl)
+		require.NotNil(t, accessControl)
+		assert.Nil(t, accessControl.AllowPublicRead)
+		require.NotNil(t, accessControl.PublicAccessBlock)
+		require.NotNil(t, accessControl.PublicAccessBlock.Bucket)
+		assert.Nil(t, accessControl.PublicAccessBlock.Account)
 	})
 
 	t.Run("malformed policy", func(t *testing.T) {

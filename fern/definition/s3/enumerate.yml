@@ -17,6 +17,17 @@ types:
       - ENABLED
       - DISABLED
 # Supporting Types
+  S3PublicAccessBlockConfiguration:
+    properties:
+      blockPublicAcls: optional<boolean>
+      ignorePublicAcls: optional<boolean>
+      blockPublicPolicy: optional<boolean>
+      restrictPublicBuckets: optional<boolean>
+  S3PublicAccessBlock:
+    properties:
+      bucket: optional<S3PublicAccessBlockConfiguration>
+      account: optional<S3PublicAccessBlockConfiguration>
+      effective: optional<S3PublicAccessBlockConfiguration>
   S3BucketAccessControl:
     properties:
       # Public Access Permissions (from ACL and Policy analysis)
@@ -34,7 +45,9 @@ types:
       # Log Delivery Permissions
       allowLogDeliveryWrite: optional<boolean>
       allowLogDeliveryReadAcp: optional<boolean>
-      # Public Access Block Configuration
+      # Public Access Block Configuration by source and after effective merging
+      publicAccessBlock: optional<S3PublicAccessBlock>
+      # Effective Public Access Block values retained for compatibility
       blockPublicAcls: optional<boolean>
       ignorePublicAcls: optional<boolean>
       blockPublicPolicy: optional<boolean>

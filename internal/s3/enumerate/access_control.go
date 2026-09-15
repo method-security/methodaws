@@ -80,6 +80,11 @@ func evaluateS3Access(input accessEvaluationInput) (*s3fern.S3BucketAccessContro
 
 	policy.publicRead = blockedDecision(policy.publicRead, publicAccessBlock.restrictPublicBuckets)
 	policy.publicWrite = blockedDecision(policy.publicWrite, publicAccessBlock.restrictPublicBuckets)
+	publicAccessBlockInfo := publicAccessBlockDetails(
+		input.bucketPublicAccessBlock,
+		input.accountPublicAccessBlock,
+		publicAccessBlock,
+	)
 
 	accessControl := &s3fern.S3BucketAccessControl{
 		AllowPublicRead:                    orDecisions(acl.publicRead, policy.publicRead),
@@ -94,6 +99,7 @@ func evaluateS3Access(input accessEvaluationInput) (*s3fern.S3BucketAccessContro
 		AllowAuthenticatedUsersFullControl: acl.authenticatedUsersFullControl,
 		AllowLogDeliveryWrite:              acl.logDeliveryWrite,
 		AllowLogDeliveryReadAcp:            acl.logDeliveryReadACP,
+		PublicAccessBlock:                  publicAccessBlockInfo,
 		BlockPublicAcls:                    publicAccessBlock.blockPublicACLs,
 		IgnorePublicAcls:                   publicAccessBlock.ignorePublicACLs,
 		BlockPublicPolicy:                  publicAccessBlock.blockPublicPolicy,
@@ -104,6 +110,62 @@ func evaluateS3Access(input accessEvaluationInput) (*s3fern.S3BucketAccessContro
 		return nil, policyErr
 	}
 	return accessControl, policyErr
+}
+
+func publicAccessBlockDetails(
+	bucketState, accountState publicAccessBlockState,
+	effective effectivePublicAccessBlock,
+) *s3fern.S3PublicAccessBlock {
+	bucket := publicAccessBlockConfiguration(bucketState)
+	account := publicAccessBlockConfiguration(accountState)
+	effectiveConfiguration := publicAccessBlockConfigurationFromValues(
+		effective.blockPublicACLs,
+		effective.ignorePublicACLs,
+		effective.blockPublicPolicy,
+		effective.restrictPublicBuckets,
+	)
+	if bucket == nil && account == nil && effectiveConfiguration == nil {
+		return nil
+	}
+	return &s3fern.S3PublicAccessBlock{
+		Bucket:    bucket,
+		Account:   account,
+		Effective: effectiveConfiguration,
+	}
+}
+
+func publicAccessBlockConfiguration(state publicAccessBlockState) *s3fern.S3PublicAccessBlockConfiguration {
+	if !state.known {
+		return nil
+	}
+	if state.configuration == nil {
+		return publicAccessBlockConfigurationFromValues(
+			boolPointer(false),
+			boolPointer(false),
+			boolPointer(false),
+			boolPointer(false),
+		)
+	}
+	return publicAccessBlockConfigurationFromValues(
+		state.configuration.BlockPublicAcls,
+		state.configuration.IgnorePublicAcls,
+		state.configuration.BlockPublicPolicy,
+		state.configuration.RestrictPublicBuckets,
+	)
+}
+
+func publicAccessBlockConfigurationFromValues(
+	blockPublicACLs, ignorePublicACLs, blockPublicPolicy, restrictPublicBuckets *bool,
+) *s3fern.S3PublicAccessBlockConfiguration {
+	if blockPublicACLs == nil && ignorePublicACLs == nil && blockPublicPolicy == nil && restrictPublicBuckets == nil {
+		return nil
+	}
+	return &s3fern.S3PublicAccessBlockConfiguration{
+		BlockPublicAcls:       blockPublicACLs,
+		IgnorePublicAcls:      ignorePublicACLs,
+		BlockPublicPolicy:     blockPublicPolicy,
+		RestrictPublicBuckets: restrictPublicBuckets,
+	}
 }
 
 func evaluatePolicyPermissions(policyDocument *string, known bool, bucketARN string) (policyPermissions, error) {
@@ -262,6 +324,7 @@ func accessControlHasValues(accessControl *s3fern.S3BucketAccessControl) bool {
 		accessControl.AllowAuthenticatedUsersWrite != nil || accessControl.AllowAuthenticatedUsersReadAcp != nil ||
 		accessControl.AllowAuthenticatedUsersWriteAcp != nil || accessControl.AllowAuthenticatedUsersFullControl != nil ||
 		accessControl.AllowLogDeliveryWrite != nil || accessControl.AllowLogDeliveryReadAcp != nil ||
+		accessControl.PublicAccessBlock != nil ||
 		accessControl.BlockPublicAcls != nil || accessControl.IgnorePublicAcls != nil ||
 		accessControl.BlockPublicPolicy != nil || accessControl.RestrictPublicBuckets != nil
 }
