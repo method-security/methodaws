@@ -135,9 +135,14 @@ func (a *MethodAws) InitS3Command() {
 
 			// Get Config
 			config := a.getS3ListConfig(accountID, bucketName)
+			cfg, err := configForSingleRegion(*a.AwsConfig, a.RootFlags.Regions)
+			if err != nil {
+				a.OutputSignal.AddError(err)
+				return
+			}
 
 			// Return report
-			report := s3list.ListS3Bucket(cmd.Context(), *a.AwsConfig, config)
+			report := s3list.ListS3Bucket(cmd.Context(), cfg, config)
 			a.setReport(report)
 		},
 	}

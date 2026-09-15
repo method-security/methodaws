@@ -4,12 +4,17 @@ package list
 import (
 	// Standard
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
 	// Generated
 	s3fern "github.com/Method-Security/methodaws/generated/go/s3"
 	// Internal
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
@@ -27,8 +32,19 @@ func ListS3Bucket(ctx context.Context, awscfg aws.Config, config s3fern.ListS3Bu
 	errors := []string{}
 	var allBucketObjects []*s3fern.BucketObject
 
-	// Initialize S3 client - S3 will route to the correct region automatically
+	awscfg = awscfg.Copy()
+	if awscfg.Region == "" {
+		awscfg.Region = "us-east-1"
+	}
 	s3Client := s3.NewFromConfig(awscfg)
+	region, err := bucketRegion(ctx, s3Client, config.BucketName)
+	if err != nil {
+		// A failed metadata lookup should not prevent a permitted object listing.
+		errors = append(errors, err.Error())
+	} else if region != awscfg.Region {
+		awscfg.Region = region
+		s3Client = s3.NewFromConfig(awscfg)
+	}
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(config.BucketName),
 	}
@@ -69,4 +85,28 @@ func ListS3Bucket(ctx context.Context, awscfg aws.Config, config s3fern.ListS3Bu
 	}
 	report.Errors = errors
 	return &report
+}
+
+func bucketRegion(ctx context.Context, client *s3.Client, bucketName string) (string, error) {
+	output, err := client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(bucketName)})
+	if err == nil {
+		if output != nil && aws.ToString(output.BucketRegion) != "" {
+			return *output.BucketRegion, nil
+		}
+		return "", fmt.Errorf("HeadBucket returned no region for bucket %s", bucketName)
+	}
+	var responseError *smithyhttp.ResponseError
+	if errors.As(err, &responseError) {
+		response := responseError.HTTPResponse()
+		if response != nil {
+			region := response.Header.Get("X-Amz-Bucket-Region")
+			switch response.StatusCode {
+			case http.StatusMovedPermanently, http.StatusTemporaryRedirect, http.StatusBadRequest, http.StatusForbidden:
+				if region != "" {
+					return region, nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("discover region for bucket %s: %w", bucketName, err)
 }

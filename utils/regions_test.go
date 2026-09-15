@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -11,6 +12,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type unavailableRegionDiscovery struct{}
+
+func (unavailableRegionDiscovery) Do(*http.Request) (*http.Response, error) {
+	return nil, errors.New("discovery unavailable")
+}
+
+func TestGetAWSRegionsPreservesFallbackWithCoverageError(t *testing.T) {
+	cfg := aws.Config{Region: "us-east-1", Credentials: aws.AnonymousCredentials{}, HTTPClient: unavailableRegionDiscovery{}, RetryMaxAttempts: 1}
+	regions, err := GetAWSRegions(context.Background(), cfg, nil)
+	require.ErrorContains(t, err, "coverage is incomplete")
+	assert.Equal(t, []string{"us-east-1"}, regions)
+	regions, err = GetAWSRegions(context.Background(), cfg, []string{"us-west-2"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"us-west-2"}, regions)
+}
 
 type stubDescribeRegionsClient struct {
 	output *ec2.DescribeRegionsOutput
@@ -40,14 +57,14 @@ func TestEnabledAWSRegionsSortsDeduplicatesAndSkipsMissingNames(t *testing.T) {
 }
 
 func TestNormalizeSelectedRegions(t *testing.T) {
-	regions, err := normalizeSelectedRegions([]string{"us-west-2", "mx-central-1", "us-west-2"})
+	regions, err := NormalizeSelectedRegions([]string{"us-west-2", "mx-central-1", "us-west-2"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"mx-central-1", "us-west-2"}, regions)
 
-	_, err = normalizeSelectedRegions([]string{"us-east-1", "us-gov-west-1"})
+	_, err = NormalizeSelectedRegions([]string{"us-east-1", "us-gov-west-1"})
 	require.EqualError(t, err, "selected AWS regions must belong to one partition")
 
-	_, err = normalizeSelectedRegions([]string{""})
+	_, err = NormalizeSelectedRegions([]string{""})
 	require.EqualError(t, err, "at least one AWS region must be selected")
 }
 

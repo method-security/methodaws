@@ -109,7 +109,11 @@ func (a *MethodAws) setupCommonConfig(cmd *cobra.Command, outputFormat string, o
 		if commandRequiresRegionDiscovery(cmd) {
 			a.RootFlags.Regions, err = utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
 			if err != nil {
-				return fmt.Errorf("unable to discover enabled AWS regions: %w", err)
+				if len(a.RootFlags.Regions) == 0 {
+					return fmt.Errorf("unable to discover enabled AWS regions: %w", err)
+				}
+				// Keep fallback-region results, but do not present them as a complete scan.
+				a.OutputSignal.AddError(err)
 			}
 		}
 	}
@@ -195,6 +199,21 @@ func (a *MethodAws) writeOutput() error {
 		a.OutputSignal.Status,
 		a.OutputSignal.ErrorMessage,
 	)
+}
+
+func configForSingleRegion(cfg aws.Config, selectedRegions []string) (aws.Config, error) {
+	cfg = cfg.Copy()
+	if len(selectedRegions) > 0 {
+		regions, err := utils.NormalizeSelectedRegions(selectedRegions)
+		if err != nil {
+			return cfg, err
+		}
+		if len(regions) != 1 {
+			return cfg, fmt.Errorf("this command requires a single AWS region")
+		}
+		cfg.Region = regions[0]
+	}
+	return cfg, nil
 }
 
 func (a *MethodAws) setReport(report any) {

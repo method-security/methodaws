@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	eksfern "github.com/Method-Security/methodaws/generated/go/eks"
 	eks "github.com/Method-Security/methodaws/internal/eks/enumerate"
 	"github.com/Method-Security/methodaws/utils"
@@ -47,7 +49,16 @@ func (a *MethodAws) InitEksCommand() {
 				return
 			}
 
-			report, err := eks.CredsEks(cmd.Context(), *a.AwsConfig, clusterName)
+			cfg, err := configForSingleRegion(*a.AwsConfig, a.RootFlags.Regions)
+			if err != nil {
+				a.OutputSignal.AddError(err)
+				return
+			}
+			if cfg.Region == "" {
+				a.OutputSignal.AddError(fmt.Errorf("an AWS region is required for EKS credentials"))
+				return
+			}
+			report, err := eks.CredsEks(cmd.Context(), cfg, clusterName)
 			if err != nil {
 				a.OutputSignal.AddError(err)
 				return

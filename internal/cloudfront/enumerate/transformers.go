@@ -3,6 +3,8 @@ package enumerate
 import (
 	// Standard
 	"context"
+	"strings"
+
 	// Generated
 	cloudfrontfern "github.com/Method-Security/methodaws/generated/go/cloudfront"
 	// External
@@ -16,6 +18,14 @@ func extractDistributionComment(comment *string) *string {
 		return comment
 	}
 	return nil
+}
+
+func distributionDomainName(value *string) *string {
+	name := strings.TrimSpace(aws.ToString(value))
+	if name == "" || name == "-" {
+		return nil
+	}
+	return aws.String(name)
 }
 
 // extractDistributionStatus determines the distribution status
@@ -52,7 +62,7 @@ func transformDistributionToFern(ctx context.Context, awsConfig aws.Config, dist
 		Identification: &cloudfrontfern.CloudFrontDistributionIdentificationInfo{
 			Arn:        *dist.ARN,
 			Id:         dist.Id,
-			DomainName: dist.DomainName,
+			DomainName: distributionDomainName(dist.DomainName),
 		},
 		Configuration: &cloudfrontfern.CloudFrontDistributionConfigurationInfo{
 			Status:  status,
@@ -88,7 +98,7 @@ func transformDistributionSummaryToFern(ctx context.Context, awsConfig aws.Confi
 		Identification: &cloudfrontfern.CloudFrontDistributionIdentificationInfo{
 			Arn:        *dist.ARN,
 			Id:         dist.Id,
-			DomainName: dist.DomainName,
+			DomainName: distributionDomainName(dist.DomainName),
 		},
 		Configuration: &cloudfrontfern.CloudFrontDistributionConfigurationInfo{
 			Status:  status,
