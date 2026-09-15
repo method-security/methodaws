@@ -2,7 +2,7 @@ package cmd
 
 import (
 	lambdafern "github.com/Method-Security/methodaws/generated/go/lambda"
-	"github.com/Method-Security/methodaws/internal/lambda"
+	lambdaInternal "github.com/Method-Security/methodaws/internal/lambda/enumerate"
 	"github.com/Method-Security/methodaws/utils"
 	"github.com/spf13/cobra"
 )
@@ -29,7 +29,7 @@ func (a *MethodAws) InitLambdaCommand() {
 			config := getLambdaEnumerateConfig(a.RootFlags.Regions, accountID)
 
 			// Get Report
-			report := lambda.EnumerateLambda(cmd.Context(), *a.AwsConfig, config)
+			report := lambdaInternal.EnumerateLambda(cmd.Context(), *a.AwsConfig, config)
 			a.setReport(report)
 		},
 	})
