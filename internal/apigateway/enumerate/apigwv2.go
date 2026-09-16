@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
+	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
@@ -116,6 +117,11 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 		return nil, errors
 	}
 
+	apiARN, err := utils.BuildRegionalARN(region, "apigateway", "", "/apis/"+*api.ApiId)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("Failed to build HTTP API ARN for API %s: %s", *api.ApiId, err)}
+	}
+
 	// Get routes for this API with security info
 	routes, errs := getHTTPAPIRoutes(ctx, client, *api.ApiId, region)
 	errors = append(errors, errs...)
@@ -160,6 +166,7 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 
 	// Create identification info
 	identification := &apigatewayfern.ApiGatewayIdentificationInfo{
+		Arn:    apiARN,
 		Id:     *api.ApiId,
 		Name:   api.Name,
 		Region: region,

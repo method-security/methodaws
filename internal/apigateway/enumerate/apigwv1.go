@@ -110,6 +110,10 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 	if aws.ToString(api.Id) == "" {
 		return nil, []string{"REST API ID is missing"}
 	}
+	apiARN, err := utils.BuildRegionalARN(region, "apigateway", "", "/restapis/"+*api.Id)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("Failed to build REST API ARN for API %s: %s", *api.Id, err)}
+	}
 	var stageNames []string
 	for _, stage := range stages {
 		if aws.ToString(stage.StageName) == "" {
@@ -124,7 +128,7 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 	errors = append(errors, routeErrors...)
 
 	// Get endpoint configuration (not used in simplified version)
-	_, err := getEndpointConfiguration(api.EndpointConfiguration)
+	_, err = getEndpointConfiguration(api.EndpointConfiguration)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("Endpoint configuration parsing failed for API %s: %s", *api.Id, err.Error()))
 	}
@@ -169,6 +173,7 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 
 	// Create identification info
 	identification := &apigatewayfern.ApiGatewayIdentificationInfo{
+		Arn:    apiARN,
 		Id:     *api.Id,
 		Name:   api.Name,
 		Region: region,
