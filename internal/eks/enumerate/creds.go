@@ -72,7 +72,11 @@ func CredsEks(ctx context.Context, cfg aws.Config, clusterName string) (*eksfern
 			Errors: errors,
 		}, nil
 	}
-	tok, err := gen.GetWithSTS(aws.ToString(clusterOutput.Cluster.Name), awssts.NewFromConfig(cfg))
+	clusterID := aws.ToString(clusterOutput.Cluster.Id)
+	if clusterID == "" {
+		clusterID = aws.ToString(clusterOutput.Cluster.Name)
+	}
+	tok, err := gen.GetWithSTS(clusterID, awssts.NewFromConfig(cfg))
 	if err != nil {
 		errors = append(errors, err.Error())
 		return &eksfern.EksCredentialReport{
