@@ -84,7 +84,7 @@ func isIAMRole(arn string) bool {
 // Helper function to identify resource type (removed - no longer used in simplified schema)
 
 // createIamRoleReference creates an IAM role reference from an ARN
-func createIamRoleReference(arn, region string) *common.IamRoleReference {
+func createIamRoleReference(arn string) *common.IamRoleReference {
 	if !isIAMRole(arn) {
 		return nil
 	}
@@ -97,7 +97,6 @@ func createIamRoleReference(arn, region string) *common.IamRoleReference {
 	return &common.IamRoleReference{
 		Arn:      arn,
 		RoleName: roleName,
-		Region:   region,
 	}
 }
 
@@ -260,7 +259,7 @@ func createRouteResources(integration *apigatewayfern.Integration, region string
 	case "aws_proxy":
 		if awsProxy := integration.AwsProxy; awsProxy != nil && awsProxy.Backend != nil {
 			// Set execution role if available
-			links.ExecutionRole = createIamRoleReference(awsProxy.Backend.Arn, region)
+			links.ExecutionRole = createIamRoleReference(awsProxy.Backend.Arn)
 		}
 
 	case "vpc_link":

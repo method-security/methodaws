@@ -270,6 +270,14 @@ func EnumerateS3(ctx context.Context, awscfg aws.Config, config s3fern.S3Enumera
 		Config: &config,
 		Result: &s3fern.S3EnumerateResult{},
 	}
+	if len(config.Regions) > 0 {
+		regions, err := methodawsutils.NormalizeSelectedRegions(config.Regions)
+		if err != nil {
+			report.Errors = []string{err.Error()}
+			return report
+		}
+		config.Regions = regions
+	}
 	errors := []string{}
 
 	// Use a single region to list all buckets (buckets are globally shared)
