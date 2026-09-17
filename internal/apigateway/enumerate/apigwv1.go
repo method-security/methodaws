@@ -269,7 +269,9 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 
 			// Convert integration if present
 			var integration *apigatewayfern.Integration
+			var credentials *string
 			if method.MethodIntegration != nil {
+				credentials = method.MethodIntegration.Credentials
 				integ, err := convertV1Integration(ctx, client, vpcLinkTargets, method.MethodIntegration, region)
 				integration = integ
 				if err != nil {
@@ -310,24 +312,10 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 			// Get authorizer info if present (simplified - not included in route)
 			_ = method.AuthorizerId
 
-			// Create route-specific resource links
-			resourceLinks := createRouteResources(integration, region)
-
-			// Create resources only if there's something to include
-			var resources *apigatewayfern.RouteResourceInfo
-			if integration != nil || (resourceLinks != nil && (resourceLinks.ExecutionRole != nil || resourceLinks.CloudWatchLog != nil)) {
-				resources = &apigatewayfern.RouteResourceInfo{}
-
-				// Add integration if it exists
-				if integration != nil {
-					resources.Integration = integration
-				}
-
-				// Add other resource links if they exist
-				if resourceLinks != nil {
-					resources.ExecutionRole = resourceLinks.ExecutionRole
-					resources.CloudWatchLog = resourceLinks.CloudWatchLog
-				}
+			resources, err := createRouteResources(integration, credentials)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("Invalid integration credentials for API %s, resource %s, method %s: %s",
+					apiID, *resource.Id, methodName, err))
 			}
 
 			route := &apigatewayfern.Route{
@@ -340,10 +328,7 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 					ApiKeyRequired: method.ApiKeyRequired,
 				},
 			}
-			// Add resources if they exist
-			if resources != nil && (resources.Integration != nil || resources.ExecutionRole != nil || resources.CloudWatchLog != nil) {
-				route.Resources = resources
-			}
+			route.Resources = resources
 			routes = append(routes, route)
 		}
 	}

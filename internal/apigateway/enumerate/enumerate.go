@@ -3,6 +3,7 @@ package apigateway
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
@@ -13,6 +14,8 @@ import (
 )
 
 const lambdaInvocationResourceMarker = "functions/"
+
+var iamAccountIDPattern = regexp.MustCompile(`^[0-9]{12}$`)
 
 // EnumerateAPIGateway enumerates API Gateways based on the provided configuration
 func EnumerateAPIGateway(ctx context.Context, awsConfig aws.Config, config apigatewayfern.ApiGatewayEnumerateConfig) *apigatewayfern.ApiGatewayEnumerateReport {
@@ -75,54 +78,26 @@ func convertInt32PtrToIntPtr(val *int32) *int {
 	return &converted
 }
 
-// Helper functions for resource identification
-
-func isIAMRole(arn string) bool {
-	return strings.Contains(arn, ":iam:") && strings.Contains(arn, ":role/")
-}
-
-// Helper function to identify resource type (removed - no longer used in simplified schema)
-
-// createIamRoleReference creates an IAM role reference from an ARN
-func createIamRoleReference(arn string) *common.IamRoleReference {
-	if !isIAMRole(arn) {
-		return nil
+func executionRoleFromCredentials(credentials string) (*common.IamRoleReference, error) {
+	if credentials == "" {
+		return nil, nil
 	}
-
-	roleName := extractResourceNameFromArn(arn)
-	if roleName == nil {
-		return nil
+	parsed, err := awsarn.Parse(credentials)
+	if err != nil {
+		return nil, fmt.Errorf("parse integration credentials ARN: %w", err)
 	}
-
-	return &common.IamRoleReference{
-		Arn:      arn,
-		RoleName: roleName,
+	// This AWS sentinel passes through the caller identity; it does not identify a role.
+	if parsed.Partition != "" && parsed.Service == "iam" && parsed.Region == "" &&
+		parsed.AccountID == "*" && parsed.Resource == "user/*" {
+		return nil, nil
 	}
-}
-
-func extractResourceNameFromArn(arn string) *string {
-	if arn == "" {
-		return nil
+	roleName := parsed.Resource[strings.LastIndex(parsed.Resource, "/")+1:]
+	if parsed.Partition == "" || parsed.Service != "iam" || parsed.Region != "" ||
+		!iamAccountIDPattern.MatchString(parsed.AccountID) || !strings.HasPrefix(parsed.Resource, "role/") ||
+		roleName == "" || strings.ContainsAny(credentials, "*? \t\r\n") {
+		return nil, fmt.Errorf("integration credentials do not identify a concrete IAM role")
 	}
-
-	parts := strings.Split(arn, "/")
-	if len(parts) > 0 {
-		name := parts[len(parts)-1]
-		if name != "" {
-			return &name
-		}
-	}
-
-	// Fallback: extract from colon-separated parts
-	parts = strings.Split(arn, ":")
-	if len(parts) > 0 {
-		name := parts[len(parts)-1]
-		if name != "" {
-			return &name
-		}
-	}
-
-	return nil
+	return &common.IamRoleReference{Arn: credentials, RoleName: &roleName}, nil
 }
 
 func lambdaBackendFromIntegrationURI(integrationURI string) (*apigatewayfern.LambdaBackend, error) {
@@ -246,31 +221,10 @@ func analyzeAPISecurity(routes []*apigatewayfern.Route, certificates []*apigatew
 	return analysis
 }
 
-// createRouteResources creates route-specific resource links from integration data (excluding integration itself)
-func createRouteResources(integration *apigatewayfern.Integration, region string) *apigatewayfern.RouteResourceInfo {
-	if integration == nil {
-		return nil
+func createRouteResources(integration *apigatewayfern.Integration, credentials *string) (*apigatewayfern.RouteResourceInfo, error) {
+	role, err := executionRoleFromCredentials(aws.ToString(credentials))
+	if integration == nil && role == nil {
+		return nil, err
 	}
-
-	links := &apigatewayfern.RouteResourceInfo{}
-
-	// Extract resources based on integration type and backend
-	switch integration.Type {
-	case "aws_proxy":
-		if awsProxy := integration.AwsProxy; awsProxy != nil && awsProxy.Backend != nil {
-			// Set execution role if available
-			links.ExecutionRole = createIamRoleReference(awsProxy.Backend.Arn)
-		}
-
-	case "vpc_link":
-		// VPC Link details are stored in integration.backend only, no duplication in route resources
-		// Only set VPC and security group references if needed for the route itself
-	}
-
-	// Return nil if no resources were found
-	if links.ExecutionRole == nil && links.CloudWatchLog == nil {
-		return nil
-	}
-
-	return links
+	return &apigatewayfern.RouteResourceInfo{Integration: integration, ExecutionRole: role}, err
 }
