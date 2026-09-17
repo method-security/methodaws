@@ -29,6 +29,7 @@ types:
       arn: string
   ApiGatewayOriginBackend:
     properties:
+      arn: string
       id: string
       region: string
   CloudFrontOriginBackend:

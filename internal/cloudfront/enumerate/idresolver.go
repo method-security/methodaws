@@ -11,6 +11,8 @@ import (
 	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
+	"github.com/aws/aws-sdk-go-v2/service/apigateway"
+	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	elbtypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
@@ -72,17 +74,49 @@ func resolveOriginBackend(ctx context.Context, awsConfig aws.Config, domainName 
 			Type: "ec2", Ec2: &cloudfrontfern.Ec2OriginBackend{Arn: instanceARN},
 		}, nil
 	case cloudfrontfern.CloudFrontResourceTypeApiGateway:
-		matches := matchOriginDomain(apiGatewayOriginDomain, domainName)
-		if len(matches) < 3 {
-			return nil, fmt.Errorf("invalid API Gateway origin domain: %s", domainName)
-		}
-		// The hostname identifies the API and region, but not its owning account.
-		return &cloudfrontfern.CloudFrontOriginBackend{
-			Type: "api_gateway", ApiGateway: &cloudfrontfern.ApiGatewayOriginBackend{Id: matches[1], Region: matches[2]},
-		}, nil
+		return resolveAPIGateway(ctx, awsConfig, domainName)
 	default:
 		return nil, nil
 	}
+}
+
+func resolveAPIGateway(ctx context.Context, cfg aws.Config, domainName string) (*cloudfrontfern.CloudFrontOriginBackend, error) {
+	matches := matchOriginDomain(apiGatewayOriginDomain, domainName)
+	if len(matches) < 3 {
+		return nil, fmt.Errorf("invalid API Gateway origin domain: %s", domainName)
+	}
+	apiID, region := matches[1], matches[2]
+	cfg.Region = region
+
+	// REST and v2 APIs share the hostname format but use different resource ARNs.
+	// Resolve the API family through AWS rather than guessing it from DNS.
+	resource := ""
+	restAPI, restErr := apigateway.NewFromConfig(cfg).GetRestApi(ctx, &apigateway.GetRestApiInput{RestApiId: &apiID})
+	if restErr == nil && restAPI != nil && aws.ToString(restAPI.Id) == apiID {
+		resource = "/restapis/" + apiID
+	} else {
+		if restErr == nil {
+			restErr = fmt.Errorf("GetRestApi returned an incomplete or mismatched API identity")
+		}
+		api, apiErr := apigatewayv2.NewFromConfig(cfg).GetApi(ctx, &apigatewayv2.GetApiInput{ApiId: &apiID})
+		if apiErr != nil {
+			return nil, fmt.Errorf("resolve API Gateway origin %s: REST lookup: %v; v2 lookup: %w", domainName, restErr, apiErr)
+		}
+		if api == nil || aws.ToString(api.ApiId) != apiID {
+			return nil, fmt.Errorf("resolve API Gateway origin %s: REST lookup: %v; GetApi returned an incomplete or mismatched API identity", domainName, restErr)
+		}
+		resource = "/apis/" + apiID
+	}
+	apiARN, err := utils.BuildRegionalARN(region, "apigateway", "", resource)
+	if err != nil {
+		return nil, err
+	}
+	return &cloudfrontfern.CloudFrontOriginBackend{
+		Type: "api_gateway",
+		ApiGateway: &cloudfrontfern.ApiGatewayOriginBackend{
+			Arn: apiARN, Id: apiID, Region: region,
+		},
+	}, nil
 }
 
 func resolveLoadBalancer(ctx context.Context, awsConfig aws.Config, domainName string) (*common.LoadBalancerReference, error) {
