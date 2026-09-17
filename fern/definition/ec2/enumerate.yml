@@ -64,7 +64,7 @@ types:
   InstanceNetworkInterfaceIdentificationInfo:
     properties:
       id: string
-      arn: optional<string>
+      arn: string
       region: string
   InstanceNetworkInterfaceConfigurationInfo:
     properties:
@@ -79,6 +79,7 @@ types:
   InstanceNetworkInterfaceResourceInfo:
     properties:
       vpc: common.VpcReference
+      securityGroupIds: optional<list<string>>
 # Main Network Interface Structs
   InstanceNetworkInterface:
     properties:
@@ -89,6 +90,7 @@ types:
   Ec2InstanceIdentificationInfo:
     properties:
       id: string
+      arn: string
       name: optional<string>
       region: string
   Ec2InstanceConfigurationInfo:

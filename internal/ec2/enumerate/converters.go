@@ -3,19 +3,25 @@ package enumerate
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Method-Security/methodaws/generated/go/common"
 	ec2 "github.com/Method-Security/methodaws/generated/go/ec2"
+	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
 // convertInstanceToFern converts AWS EC2 Instance to Fern Ec2Instance
-func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, region string) (*ec2.Ec2Instance, []string) {
+func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, region, ownerID string) (*ec2.Ec2Instance, []string) {
 	if aws.ToString(awsInstance.InstanceId) == "" || region == "" {
 		return nil, []string{"Instance ID or region is empty"}
+	}
+	instanceARN, err := buildEC2ResourceARN(region, ownerID, "instance/"+*awsInstance.InstanceId)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("cannot identify instance %s: %s", *awsInstance.InstanceId, err)}
 	}
 	var errors []string
 
@@ -68,6 +74,7 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 	instance := &ec2.Ec2Instance{
 		Identification: &ec2.Ec2InstanceIdentificationInfo{
 			Id:     *awsInstance.InstanceId,
+			Arn:    instanceARN,
 			Region: region,
 			Name:   name,
 		},
@@ -180,6 +187,11 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 			errors = append(errors, "Network interface ID is empty")
 			continue
 		}
+		interfaceARN, err := buildEC2ResourceARN(region, aws.ToString(ni.OwnerId), "network-interface/"+*ni.NetworkInterfaceId)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("cannot identify network interface %s: %s", *ni.NetworkInterfaceId, err))
+			continue
+		}
 
 		// Prepare status
 		var status *string
@@ -229,6 +241,7 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 		fernNI := &ec2.InstanceNetworkInterface{
 			Identification: &ec2.InstanceNetworkInterfaceIdentificationInfo{
 				Id:     *ni.NetworkInterfaceId,
+				Arn:    interfaceARN,
 				Region: region,
 			},
 			Configuration: &ec2.InstanceNetworkInterfaceConfigurationInfo{
@@ -243,13 +256,25 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 			},
 		}
 		if vpcReference != nil {
-			fernNI.Resources = &ec2.InstanceNetworkInterfaceResourceInfo{Vpc: vpcReference}
+			fernNI.Resources = &ec2.InstanceNetworkInterfaceResourceInfo{
+				Vpc:              vpcReference,
+				SecurityGroupIds: extractSecurityGroupIds(ni.Groups),
+			}
 		}
 
 		fernInterfaces = append(fernInterfaces, fernNI)
 	}
 
 	return fernInterfaces, errors
+}
+
+var accountIDPattern = regexp.MustCompile(`^[0-9]{12}$`)
+
+func buildEC2ResourceARN(region, ownerID, resource string) (string, error) {
+	if !accountIDPattern.MatchString(ownerID) {
+		return "", fmt.Errorf("missing or invalid resource owner account ID %q", ownerID)
+	}
+	return utils.BuildRegionalARN(region, "ec2", ownerID, resource)
 }
 
 // convertTags converts AWS tags to Fern format

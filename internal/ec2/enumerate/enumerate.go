@@ -78,35 +78,37 @@ func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region str
 	iamClient := iamaws.NewFromConfig(regionConfig)
 
 	// Get all instances
-	awsInstances, errs := getAllInstances(ctx, client, region)
+	reservations, errs := getAllReservations(ctx, client, region)
 	errors = append(errors, errs...)
 
 	log.Info("Processing ec2aws instances",
 		svc1log.SafeParam("region", region),
-		svc1log.SafeParam("instanceCount", len(awsInstances)))
+		svc1log.SafeParam("reservationCount", len(reservations)))
 
 	// Process each instance
-	for _, awsInstance := range awsInstances {
-		instance, errs := processInstance(ctx, awsInstance, region)
-		if instance != nil {
-			role, err := profileCache.resolveRole(ctx, iamClient, awsInstance.IamInstanceProfile)
-			if err != nil {
-				errs = append(errs, err.Error())
+	for _, reservation := range reservations {
+		for _, awsInstance := range reservation.Instances {
+			instance, errs := processInstance(ctx, awsInstance, region, aws.ToString(reservation.OwnerId))
+			if instance != nil {
+				role, err := profileCache.resolveRole(ctx, iamClient, awsInstance.IamInstanceProfile)
+				if err != nil {
+					errs = append(errs, err.Error())
+				}
+				instance.Resources.IamRole = role
+				instances = append(instances, instance)
 			}
-			instance.Resources.IamRole = role
-			instances = append(instances, instance)
-		}
-		for _, err := range errs {
-			errors = append(errors, fmt.Sprintf("Instance %s in region %s: %s", aws.ToString(awsInstance.InstanceId), region, err))
+			for _, err := range errs {
+				errors = append(errors, fmt.Sprintf("Instance %s in region %s: %s", aws.ToString(awsInstance.InstanceId), region, err))
+			}
 		}
 	}
 
 	return instances, errors
 }
 
-// getAllInstances retrieves all ec2aws instances in a region
-func getAllInstances(ctx context.Context, client *ec2aws.Client, region string) ([]types.Instance, []string) {
-	var instances []types.Instance
+// getAllReservations preserves the owner account for each returned instance.
+func getAllReservations(ctx context.Context, client *ec2aws.Client, region string) ([]types.Reservation, []string) {
+	var reservations []types.Reservation
 	var errors []string
 
 	paginator := ec2aws.NewDescribeInstancesPaginator(client, &ec2aws.DescribeInstancesInput{})
@@ -117,19 +119,16 @@ func getAllInstances(ctx context.Context, client *ec2aws.Client, region string) 
 			break
 		}
 
-		// Extract instances from reservations
-		for _, reservation := range result.Reservations {
-			instances = append(instances, reservation.Instances...)
-		}
+		reservations = append(reservations, result.Reservations...)
 	}
 
-	return instances, errors
+	return reservations, errors
 }
 
 // processInstance converts an AWS instance to Fern format
-func processInstance(ctx context.Context, awsInstance types.Instance, region string) (*ec2.Ec2Instance, []string) {
+func processInstance(ctx context.Context, awsInstance types.Instance, region, ownerID string) (*ec2.Ec2Instance, []string) {
 	log := svc1log.FromContext(ctx)
 	log.Info("Processing ec2aws instance", svc1log.SafeParam("instanceId", awsInstance.InstanceId))
 	// Child conversion errors must not discard an identified instance.
-	return convertInstanceToFern(ctx, awsInstance, region)
+	return convertInstanceToFern(ctx, awsInstance, region, ownerID)
 }
