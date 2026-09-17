@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
+	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
@@ -116,6 +117,11 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 		return nil, errors
 	}
 
+	apiARN, err := utils.BuildRegionalARN(region, "apigateway", "", "/apis/"+*api.ApiId)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("Failed to build HTTP API ARN for API %s: %s", *api.ApiId, err)}
+	}
+
 	// Get routes for this API with security info
 	routes, errs := getHTTPAPIRoutes(ctx, client, *api.ApiId, region)
 	errors = append(errors, errs...)
@@ -160,6 +166,7 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 
 	// Create identification info
 	identification := &apigatewayfern.ApiGatewayIdentificationInfo{
+		Arn:    apiARN,
 		Id:     *api.ApiId,
 		Name:   api.Name,
 		Region: region,
@@ -243,6 +250,7 @@ func getHTTPAPIRoutes(ctx context.Context, client *apigatewayv2.Client, apiID, r
 		}
 		// Get integration for this route if it exists
 		var integration *apigatewayfern.Integration
+		var credentials *string
 		if route.Target != nil {
 			// Extract integration ID from target (format: "integrations/{integrationId}")
 			if len(*route.Target) > len("integrations/") {
@@ -256,6 +264,7 @@ func getHTTPAPIRoutes(ctx context.Context, client *apigatewayv2.Client, apiID, r
 				} else if integrationResult == nil {
 					errors = append(errors, fmt.Sprintf("GetIntegration returned no response for API %s", apiID))
 				} else {
+					credentials = integrationResult.CredentialsArn
 					integ, err := convertV2Integration(integrationResult, region)
 					if err != nil {
 						errors = append(errors, err.Error())
@@ -296,24 +305,9 @@ func getHTTPAPIRoutes(ctx context.Context, client *apigatewayv2.Client, apiID, r
 		// Get authorizer details if specified (simplified - not included in route)
 		_ = route.AuthorizerId
 
-		// Create route-specific resource links
-		resourceLinks := createRouteResources(integration, region)
-
-		// Create resources only if there's something to include
-		var resources *apigatewayfern.RouteResourceInfo
-		if integration != nil || (resourceLinks != nil && (resourceLinks.ExecutionRole != nil || resourceLinks.CloudWatchLog != nil)) {
-			resources = &apigatewayfern.RouteResourceInfo{}
-
-			// Add integration if it exists
-			if integration != nil {
-				resources.Integration = integration
-			}
-
-			// Add other resource links if they exist
-			if resourceLinks != nil {
-				resources.ExecutionRole = resourceLinks.ExecutionRole
-				resources.CloudWatchLog = resourceLinks.CloudWatchLog
-			}
+		resources, err := createRouteResources(integration, credentials)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("Invalid integration credentials for API %s, route %s: %s", apiID, routeKey, err))
 		}
 
 		fernRoute := &apigatewayfern.Route{
@@ -326,10 +320,7 @@ func getHTTPAPIRoutes(ctx context.Context, client *apigatewayv2.Client, apiID, r
 				// Note: HTTP API doesn't have API key requirement per route like REST API
 			},
 		}
-		// Add resources if they exist
-		if resources != nil && (resources.Integration != nil || resources.ExecutionRole != nil || resources.CloudWatchLog != nil) {
-			fernRoute.Resources = resources
-		}
+		fernRoute.Resources = resources
 
 		routes = append(routes, fernRoute)
 	}

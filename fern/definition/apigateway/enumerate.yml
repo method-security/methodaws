@@ -157,6 +157,7 @@ types:
 # API Gateway Structure
   ApiGatewayIdentificationInfo:
     properties:
+      arn: string
       id: string
       name: optional<string>
       region: string
