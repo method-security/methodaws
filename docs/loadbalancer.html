@@ -831,9 +831,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#applicationnetwork-load-balancers-v2" class="md-nav__link">
+  <a href="#applicationnetworkgateway-load-balancers-v2" class="md-nav__link">
     <span class="md-ellipsis">
-      Application/Network Load Balancers (V2)
+      Application/Network/Gateway Load Balancers (V2)
     </span>
   </a>
   
@@ -1339,9 +1339,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#applicationnetwork-load-balancers-v2" class="md-nav__link">
+  <a href="#applicationnetworkgateway-load-balancers-v2" class="md-nav__link">
     <span class="md-ellipsis">
-      Application/Network Load Balancers (V2)
+      Application/Network/Gateway Load Balancers (V2)
     </span>
   </a>
   
@@ -1427,27 +1427,31 @@ methodaws<span class="w"> </span>load-balancer<span class="w"> </span>enumerate<
 <h3 id="classic-load-balancers-v1">Classic Load Balancers (V1)<a class="headerlink" href="#classic-load-balancers-v1" title="Permanent link">#</a></h3>
 <ul>
 <li>Load balancer configurations</li>
-<li>Listeners and health checks</li>
+<li>Listeners with separate frontend and backend port/protocol settings</li>
 <li>Instance registrations</li>
 <li>Security groups</li>
 <li>Subnets and availability zones</li>
 </ul>
-<h3 id="applicationnetwork-load-balancers-v2">Application/Network Load Balancers (V2)<a class="headerlink" href="#applicationnetwork-load-balancers-v2" title="Permanent link">#</a></h3>
+<h3 id="applicationnetworkgateway-load-balancers-v2">Application/Network/Gateway Load Balancers (V2)<a class="headerlink" href="#applicationnetworkgateway-load-balancers-v2" title="Permanent link">#</a></h3>
 <ul>
 <li>Load balancer configurations</li>
 <li>Target groups and targets</li>
-<li>Listeners and rules</li>
-<li>Health check configurations</li>
+<li>Listeners and their default forwarding target-group references, including configured weights</li>
+<li>Listener certificate references</li>
 <li>Security groups and subnets</li>
-<li>Access logs configuration</li>
 </ul>
+<p>Non-default listener rules are not collected. A target group listed under a load balancer is not automatically
+the destination of every listener. Default forwarding references include zero-weight targets and describe
+configuration, not proof of active forwarding or reachability.</p>
+<p>Classic instance registrations do not carry a target port. Use each listener's backend port and protocol;
+these settings are not copied onto all registered instances.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">#</a></h2>
 <p>The output includes detailed information about your load balancers and their configurations in the specified output format (signal, json).</p>
 <h2 id="security-considerations">Security Considerations<a class="headerlink" href="#security-considerations" title="Permanent link">#</a></h2>
 <p>When enumerating load balancers, methodaws will collect:
 - Security group associations
 - SSL/TLS certificate information
-- Target health status
+- Registered targets, without a determination of target health
 - Network configuration details</p>
 
 
