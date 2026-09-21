@@ -3,8 +3,12 @@ package enumerate
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	s3fern "github.com/Method-Security/methodaws/generated/go/s3"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -90,6 +94,33 @@ func TestKmsKeyReferenceRejectsIdentifiersThatAreNotKeyARNs(t *testing.T) {
 	assert.Nil(t, kmsKeyReference("abcd-1234"))
 	assert.Nil(t, kmsKeyReference("alias/example"))
 	assert.Nil(t, kmsKeyReference("arn:aws:kms:us-east-1:123456789012:alias/example"))
+}
+
+func TestBucketEncryptionPreservesConfiguredKeyIdentifier(t *testing.T) {
+	for _, identifier := range []string{
+		"abcd-1234", "alias/example", "arn:aws:kms:us-east-1:123456789012:alias/example",
+		"arn:aws:kms:us-east-1:123456789012:key/abcd-1234",
+	} {
+		t.Run(identifier, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, err := fmt.Fprintf(w, `<ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>%s</KMSMasterKeyID></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>`, identifier)
+				assert.NoError(t, err)
+			}))
+			defer server.Close()
+			client := s3.NewFromConfig(aws.Config{
+				Region: "us-east-1", BaseEndpoint: aws.String(server.URL), Credentials: aws.AnonymousCredentials{},
+			}, func(options *s3.Options) { options.UsePathStyle = true })
+			bucket := &s3fern.S3Bucket{
+				Identification: &s3fern.S3BucketIdentificationInfo{Name: "example-bucket"},
+				Configuration:  &s3fern.S3BucketConfigurationInfo{},
+			}
+			result, err := bucketEncryption(context.Background(), client, bucket)
+			require.NoError(t, err)
+			require.Len(t, result.Configuration.EncryptionRules, 1)
+			assert.Equal(t, aws.String(identifier), result.Configuration.EncryptionRules[0].KmsKeyIdentifier)
+			assert.Equal(t, kmsKeyReference(identifier), result.Configuration.EncryptionRules[0].KmsKey)
+		})
+	}
 }
 
 func TestListBucketsPaginates(t *testing.T) {

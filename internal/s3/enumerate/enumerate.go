@@ -58,6 +58,7 @@ func bucketEncryption(ctx context.Context, s3Client *s3.Client, bucket *s3fern.S
 				encryptionRule.SseAlgorithm = &sseAlgorithm
 			}
 			if rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID != nil {
+				encryptionRule.KmsKeyIdentifier = rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID
 				encryptionRule.KmsKey = kmsKeyReference(*rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID)
 			}
 			encryptionRules = append(encryptionRules, &encryptionRule)

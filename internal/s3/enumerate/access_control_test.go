@@ -24,7 +24,7 @@ func TestEvaluateS3AccessKnownPrivateBucket(t *testing.T) {
 	require.NotNil(t, accessControl)
 	assert.False(t, aws.ToBool(accessControl.AllowPublicRead))
 	assert.False(t, aws.ToBool(accessControl.AllowPublicWrite))
-	assert.False(t, aws.ToBool(accessControl.AllowAuthenticatedUsersRead))
+	assert.False(t, aws.ToBool(accessControl.AllowAuthenticatedUsersList))
 	assert.False(t, aws.ToBool(accessControl.AllowAuthenticatedUsersWrite))
 	assert.False(t, aws.ToBool(accessControl.BlockPublicAcls))
 	assert.False(t, aws.ToBool(accessControl.RestrictPublicBuckets))
@@ -199,7 +199,7 @@ func TestEvaluateS3AccessRequiresEveryACLReadOperationToBeDenied(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, accessControl)
-	assert.Equal(t, boolPointer(true), accessControl.AllowPublicRead)
+	assert.Equal(t, boolPointer(true), accessControl.AllowPublicList)
 }
 
 func TestEvaluateS3AccessAppliesCompletePolicyDenyToACLRead(t *testing.T) {
@@ -225,7 +225,7 @@ func TestEvaluateS3AccessAppliesCompletePolicyDenyToACLRead(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, accessControl)
-	assert.Equal(t, boolPointer(false), accessControl.AllowPublicRead)
+	assert.Equal(t, boolPointer(false), accessControl.AllowPublicList)
 }
 
 func TestEvaluateS3AccessEvaluatesDeniesForEachACLPrincipalType(t *testing.T) {
@@ -255,8 +255,8 @@ func TestEvaluateS3AccessEvaluatesDeniesForEachACLPrincipalType(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, accessControl)
-	assert.Equal(t, boolPointer(false), accessControl.AllowPublicRead)
-	assert.Equal(t, boolPointer(true), accessControl.AllowAuthenticatedUsersRead)
+	assert.Equal(t, boolPointer(false), accessControl.AllowPublicList)
+	assert.Equal(t, boolPointer(true), accessControl.AllowAuthenticatedUsersList)
 }
 
 func TestEvaluateS3AccessRequiresEveryACLWriteOperationToBeDenied(t *testing.T) {
@@ -427,7 +427,8 @@ func TestEvaluateS3AccessLeavesUncertainResultsUnset(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, accessControl)
-		assert.Nil(t, accessControl.AllowPublicRead)
+		assert.Nil(t, accessControl.AllowPublicList)
+		assert.Equal(t, boolPointer(false), accessControl.AllowPublicRead)
 		assert.Nil(t, accessControl.IgnorePublicAcls)
 	})
 }
@@ -439,6 +440,33 @@ func TestEvaluateS3AccessRequiresBucketARN(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, accessControl)
+}
+
+func TestEvaluateS3AccessSeparatesListingAndObjectRead(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		grants     []types.Grant
+		policy     *string
+		list, read bool
+	}{
+		{name: "bucket ACL READ is listing", grants: []types.Grant{aclGrant(allUsersGroup, types.PermissionRead)}, list: true},
+		{name: "bucket ACL FULL_CONTROL is not object read", grants: []types.Grant{aclGrant(allUsersGroup, types.PermissionFullControl)}, list: true},
+		{name: "list policy", policy: aws.String(`{"Statement":{"Effect":"Allow","Principal":"*","Action":"s3:ListBucket","Resource":"arn:aws:s3:::example-bucket"}}`), list: true},
+		{name: "object read policy", policy: aws.String(`{"Statement":{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::example-bucket/*"}}`), read: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			access, err := evaluateS3Access(accessEvaluationInput{
+				bucketARN: testBucketARN, grants: tc.grants, aclKnown: true,
+				policyDocument: tc.policy, policyKnown: true,
+				bucketPublicAccessBlock:  knownPublicAccessBlock(false, false, false, false),
+				accountPublicAccessBlock: knownPublicAccessBlock(false, false, false, false),
+			})
+			require.NoError(t, err)
+			require.NotNil(t, access)
+			assert.Equal(t, aws.Bool(tc.list), access.AllowPublicList)
+			assert.Equal(t, aws.Bool(tc.read), access.AllowPublicRead)
+		})
+	}
 }
 
 func aclGrant(groupURI string, permission types.Permission) types.Grant {
