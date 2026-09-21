@@ -199,23 +199,38 @@ func isAccessDenied(err error) bool {
 }
 
 // checkPolicy checks the bucket policy
-func checkPolicy(ctx context.Context, client *s3.Client, bucketName string) (string, error) {
+func checkPolicy(ctx context.Context, client bucketEnrichmentAPI, bucketName string) (*string, error) {
 	policyOutput, err := client.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{
 		Bucket: aws.String(bucketName),
 	})
-	if err == nil && policyOutput.Policy != nil {
-		return *policyOutput.Policy, nil
+	if err != nil {
+		var apiError smithy.APIError
+		if errors.As(err, &apiError) && apiError.ErrorCode() == "NoSuchBucketPolicy" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get bucket policy for %s: %w", bucketName, err)
 	}
-	return "", fmt.Errorf("error getting bucket policy: %v", err)
+	if policyOutput == nil || policyOutput.Policy == nil || strings.TrimSpace(*policyOutput.Policy) == "" {
+		return nil, fmt.Errorf("GetBucketPolicy returned no policy for bucket %s", bucketName)
+	}
+	return policyOutput.Policy, nil
+}
+
+type bucketEnrichmentAPI interface {
+	GetBucketPolicy(context.Context, *s3.GetBucketPolicyInput, ...func(*s3.Options)) (*s3.GetBucketPolicyOutput, error)
+	GetBucketAcl(context.Context, *s3.GetBucketAclInput, ...func(*s3.Options)) (*s3.GetBucketAclOutput, error)
 }
 
 // checkACL checks the bucket ACL
-func checkACL(ctx context.Context, client *s3.Client, bucketName string) ([]*s3fern.S3BucketAccessControl, *string, *string, error) {
+func checkACL(ctx context.Context, client bucketEnrichmentAPI, bucketName string) ([]*s3fern.S3BucketAccessControl, *string, *string, error) {
 	output, err := client.GetBucketAcl(ctx, &s3.GetBucketAclInput{
 		Bucket: aws.String(bucketName),
 	})
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if output == nil {
+		return nil, nil, nil, fmt.Errorf("GetBucketAcl returned no response for bucket %s", bucketName)
 	}
 
 	// Extract owner information
@@ -259,7 +274,7 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 			hasPublic = true
 			switch permission {
 			case "READ":
-				publicACL.AllowPublicRead = aws.Bool(true)
+				publicACL.AllowPublicList = aws.Bool(true)
 			case "WRITE":
 				publicACL.AllowPublicWrite = aws.Bool(true)
 			case "READ_ACP":
@@ -267,7 +282,7 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 			case "WRITE_ACP":
 				publicACL.AllowPublicWriteAcp = aws.Bool(true)
 			case "FULL_CONTROL":
-				publicACL.AllowPublicRead = aws.Bool(true)
+				publicACL.AllowPublicList = aws.Bool(true)
 				publicACL.AllowPublicWrite = aws.Bool(true)
 				publicACL.AllowPublicReadAcp = aws.Bool(true)
 				publicACL.AllowPublicWriteAcp = aws.Bool(true)
@@ -280,7 +295,7 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 			hasAuthUser = true
 			switch permission {
 			case "READ":
-				authUserACL.AllowAuthenticatedUsersRead = aws.Bool(true)
+				authUserACL.AllowAuthenticatedUsersList = aws.Bool(true)
 			case "WRITE":
 				authUserACL.AllowAuthenticatedUsersWrite = aws.Bool(true)
 			case "READ_ACP":
@@ -288,7 +303,7 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 			case "WRITE_ACP":
 				authUserACL.AllowAuthenticatedUsersWriteAcp = aws.Bool(true)
 			case "FULL_CONTROL":
-				authUserACL.AllowAuthenticatedUsersRead = aws.Bool(true)
+				authUserACL.AllowAuthenticatedUsersList = aws.Bool(true)
 				authUserACL.AllowAuthenticatedUsersWrite = aws.Bool(true)
 				authUserACL.AllowAuthenticatedUsersReadAcp = aws.Bool(true)
 				authUserACL.AllowAuthenticatedUsersWriteAcp = aws.Bool(true)
@@ -410,7 +425,7 @@ func externalS3Region(ctx context.Context, bucketName string, region string) (*s
 	// Check bucket policy
 	policy, err := checkPolicy(ctx, client, bucketName)
 	if err == nil {
-		externalBucket.Configuration.Policy = &policy
+		externalBucket.Configuration.Policy = policy
 	} else {
 		log.Warn("Failed to get bucket policy",
 			svc1log.SafeParam("bucketName", bucketName),

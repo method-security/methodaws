@@ -30,14 +30,16 @@ types:
       effective: optional<S3PublicAccessBlockConfiguration>
   S3BucketAccessControl:
     properties:
-      # Public Access Permissions (from ACL and Policy analysis)
+      # Bucket-level listing from ACL/policy analysis; separate from object reads.
+      allowPublicList: optional<boolean>
+      # Object reads allowed by the bucket policy; does not evaluate individual object ACLs.
       allowPublicRead: optional<boolean>
       allowPublicWrite: optional<boolean>
       allowPublicReadAcp: optional<boolean>
       allowPublicWriteAcp: optional<boolean>
       allowPublicFullControl: optional<boolean>
       # Authenticated Users Permissions  
-      allowAuthenticatedUsersRead: optional<boolean>
+      allowAuthenticatedUsersList: optional<boolean>
       allowAuthenticatedUsersWrite: optional<boolean>
       allowAuthenticatedUsersReadAcp: optional<boolean>
       allowAuthenticatedUsersWriteAcp: optional<boolean>
@@ -63,6 +65,8 @@ types:
   EncryptionRule:
     properties:
       sseAlgorithm: optional<S3ServerSideEncryption>
+      # Exact configured key identifier, which may be a key ID, alias, or ARN.
+      kmsKeyIdentifier: optional<string>
       kmsKey: optional<common.KmsKeyReference>
   S3PolicyRoleReference:
     properties:

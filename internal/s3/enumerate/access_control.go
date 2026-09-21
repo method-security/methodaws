@@ -86,6 +86,7 @@ func evaluateS3Access(input accessEvaluationInput) (*s3fern.S3BucketAccessContro
 	acl.logDeliveryWrite = blockedDecision(acl.logDeliveryWrite, policy.authenticatedACLDenies.write)
 	acl.logDeliveryReadACP = blockedDecision(acl.logDeliveryReadACP, policy.authenticatedACLDenies.readACP)
 
+	policy.publicList = blockedDecision(policy.publicList, publicAccessBlock.restrictPublicBuckets)
 	policy.publicRead = blockedDecision(policy.publicRead, publicAccessBlock.restrictPublicBuckets)
 	policy.publicWrite = blockedDecision(policy.publicWrite, publicAccessBlock.restrictPublicBuckets)
 	publicAccessBlockInfo := publicAccessBlockDetails(
@@ -95,12 +96,13 @@ func evaluateS3Access(input accessEvaluationInput) (*s3fern.S3BucketAccessContro
 	)
 
 	accessControl := &s3fern.S3BucketAccessControl{
-		AllowPublicRead:                    orDecisions(acl.publicRead, policy.publicRead),
+		AllowPublicList:                    orDecisions(acl.publicRead, policy.publicList),
+		AllowPublicRead:                    policy.publicRead,
 		AllowPublicWrite:                   orDecisions(acl.publicWrite, policy.publicWrite),
 		AllowPublicReadAcp:                 acl.publicReadACP,
 		AllowPublicWriteAcp:                acl.publicWriteACP,
 		AllowPublicFullControl:             acl.publicFullControl,
-		AllowAuthenticatedUsersRead:        acl.authenticatedUsersRead,
+		AllowAuthenticatedUsersList:        acl.authenticatedUsersRead,
 		AllowAuthenticatedUsersWrite:       acl.authenticatedUsersWrite,
 		AllowAuthenticatedUsersReadAcp:     acl.authenticatedUsersReadACP,
 		AllowAuthenticatedUsersWriteAcp:    acl.authenticatedUsersWriteACP,
@@ -192,6 +194,7 @@ func evaluatePolicyPermissions(policyDocument *string, known bool, bucketARN str
 
 func knownEmptyPolicyPermissions() policyPermissions {
 	return policyPermissions{
+		publicList:             boolPointer(false),
 		publicRead:             boolPointer(false),
 		publicWrite:            boolPointer(false),
 		anonymousACLDenies:     knownEmptyACLPolicyDenies(),
@@ -333,9 +336,9 @@ func orDecisions(decisions ...*bool) *bool {
 }
 
 func accessControlHasValues(accessControl *s3fern.S3BucketAccessControl) bool {
-	return accessControl.AllowPublicRead != nil || accessControl.AllowPublicWrite != nil ||
+	return accessControl.AllowPublicList != nil || accessControl.AllowPublicRead != nil || accessControl.AllowPublicWrite != nil ||
 		accessControl.AllowPublicReadAcp != nil || accessControl.AllowPublicWriteAcp != nil ||
-		accessControl.AllowPublicFullControl != nil || accessControl.AllowAuthenticatedUsersRead != nil ||
+		accessControl.AllowPublicFullControl != nil || accessControl.AllowAuthenticatedUsersList != nil ||
 		accessControl.AllowAuthenticatedUsersWrite != nil || accessControl.AllowAuthenticatedUsersReadAcp != nil ||
 		accessControl.AllowAuthenticatedUsersWriteAcp != nil || accessControl.AllowAuthenticatedUsersFullControl != nil ||
 		accessControl.AllowLogDeliveryWrite != nil || accessControl.AllowLogDeliveryReadAcp != nil ||

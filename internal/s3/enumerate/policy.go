@@ -12,6 +12,7 @@ import (
 )
 
 type policyPermissions struct {
+	publicList             *bool
 	publicRead             *bool
 	publicWrite            *bool
 	anonymousACLDenies     aclPolicyDenies
@@ -100,9 +101,6 @@ var publicReadOperations = []func(string) policyOperation{
 	func(bucketARN string) policyOperation {
 		return policyOperation{action: "s3:GetObjectVersion", resource: bucketARN + "/object"}
 	},
-	func(bucketARN string) policyOperation {
-		return policyOperation{action: "s3:ListBucket", resource: bucketARN}
-	},
 }
 
 var publicWriteOperations = []func(string) policyOperation{
@@ -158,6 +156,7 @@ func analyzeBucketPolicy(policyJSON, bucketARN string) (policyPermissions, error
 	resolveAnonymousPolicyVariables(document.Statements, document.Version)
 
 	return policyPermissions{
+		publicList:             evaluatePolicyCapability(document.Statements, bucketARN, aclReadOperations),
 		publicRead:             evaluatePolicyCapability(document.Statements, bucketARN, publicReadOperations),
 		publicWrite:            evaluatePolicyCapability(document.Statements, bucketARN, publicWriteOperations),
 		anonymousACLDenies:     evaluateACLPolicyDenies(document.Statements, bucketARN, policyPrincipalAnonymous),

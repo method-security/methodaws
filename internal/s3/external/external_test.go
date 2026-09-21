@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,9 +98,44 @@ func TestProcessS3ACLGrantsExpandsFullControl(t *testing.T) {
 	})
 
 	require.Len(t, accessControls, 1)
-	assert.True(t, aws.ToBool(accessControls[0].AllowPublicRead))
+	assert.True(t, aws.ToBool(accessControls[0].AllowPublicList))
+	assert.Nil(t, accessControls[0].AllowPublicRead)
 	assert.True(t, aws.ToBool(accessControls[0].AllowPublicWrite))
 	assert.True(t, aws.ToBool(accessControls[0].AllowPublicReadAcp))
 	assert.True(t, aws.ToBool(accessControls[0].AllowPublicWriteAcp))
 	assert.True(t, aws.ToBool(accessControls[0].AllowPublicFullControl))
+}
+
+type stubBucketEnrichmentClient struct {
+	policy *awss3.GetBucketPolicyOutput
+	acl    *awss3.GetBucketAclOutput
+	err    error
+}
+
+func (s *stubBucketEnrichmentClient) GetBucketPolicy(context.Context, *awss3.GetBucketPolicyInput, ...func(*awss3.Options)) (*awss3.GetBucketPolicyOutput, error) {
+	return s.policy, s.err
+}
+
+func (s *stubBucketEnrichmentClient) GetBucketAcl(context.Context, *awss3.GetBucketAclInput, ...func(*awss3.Options)) (*awss3.GetBucketAclOutput, error) {
+	return s.acl, s.err
+}
+
+func TestExternalPolicyAndACLHandleMissingResponses(t *testing.T) {
+	client := &stubBucketEnrichmentClient{}
+	_, err := checkPolicy(context.Background(), client, "example-bucket")
+	require.ErrorContains(t, err, "returned no policy")
+	_, _, _, err = checkACL(context.Background(), client, "example-bucket")
+	require.ErrorContains(t, err, "returned no response")
+	client.err = &smithy.GenericAPIError{Code: "NoSuchBucketPolicy"}
+	policy, err := checkPolicy(context.Background(), client, "example-bucket")
+	require.NoError(t, err)
+	assert.Nil(t, policy)
+	client.err = &smithy.GenericAPIError{Code: "AccessDenied"}
+	_, err = checkPolicy(context.Background(), client, "example-bucket")
+	require.Error(t, err)
+	client.err = nil
+	client.policy = &awss3.GetBucketPolicyOutput{Policy: aws.String(`{"Statement":[]}`)}
+	policy, err = checkPolicy(context.Background(), client, "example-bucket")
+	require.NoError(t, err)
+	assert.Equal(t, client.policy.Policy, policy)
 }
