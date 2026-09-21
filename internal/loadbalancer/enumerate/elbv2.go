@@ -9,6 +9,7 @@ import (
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	loadbalancerfern "github.com/Method-Security/methodaws/generated/go/loadbalancer"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -218,6 +219,11 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 				Port:         port,
 				Certificates: certificates,
 			}
+			forwardTargets, forwardErrors := defaultForwardTargetGroups(listener.DefaultActions)
+			fernListener.DefaultForwardTargetGroups = forwardTargets
+			for _, err := range forwardErrors {
+				errorMessages = append(errorMessages, fmt.Sprintf("Listener %s: %s", *listener.ListenerArn, err))
+			}
 
 			// Convert protocol
 			if listener.Protocol != "" {
@@ -232,6 +238,41 @@ func listenersForLoadBalancerV2(ctx context.Context, client elbv2ResourceAPI, lo
 		}
 	}
 	return listeners, errorMessages
+}
+
+func defaultForwardTargetGroups(actions []types.Action) ([]*loadbalancerfern.ForwardTargetGroup, []string) {
+	var targets []*loadbalancerfern.ForwardTargetGroup
+	var errs []string
+	for _, action := range actions {
+		if action.Type != types.ActionTypeEnumForward {
+			continue
+		}
+		groups := []types.TargetGroupTuple{{TargetGroupArn: action.TargetGroupArn}}
+		if action.ForwardConfig != nil && len(action.ForwardConfig.TargetGroups) > 0 {
+			groups = action.ForwardConfig.TargetGroups
+		}
+		for _, group := range groups {
+			groupARN := aws.ToString(group.TargetGroupArn)
+			parsed, err := arn.Parse(groupARN)
+			if err != nil || parsed.Service != "elasticloadbalancing" || parsed.Region == "" ||
+				parsed.AccountID == "" || !strings.HasPrefix(parsed.Resource, "targetgroup/") ||
+				strings.TrimPrefix(parsed.Resource, "targetgroup/") == "" {
+				errs = append(errs, fmt.Sprintf("Default forward action has an invalid target group ARN %q", groupARN))
+				continue
+			}
+			target := &loadbalancerfern.ForwardTargetGroup{Arn: groupARN}
+			if group.Weight != nil {
+				weight := int(*group.Weight)
+				if weight < 0 || weight > 999 {
+					errs = append(errs, fmt.Sprintf("Default forward target group %s has invalid weight %d", groupARN, weight))
+				} else {
+					target.Weight = &weight
+				}
+			}
+			targets = append(targets, target)
+		}
+	}
+	return targets, errs
 }
 
 func certificatesFromListener(certificates []types.Certificate) ([]*loadbalancerfern.Certificate, []string) {

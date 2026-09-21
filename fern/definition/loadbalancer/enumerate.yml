@@ -63,6 +63,10 @@ types:
     properties:
       arn: string
       isDefault: boolean
+  ForwardTargetGroup:
+    properties:
+      arn: string
+      weight: optional<integer>
   Listener:
     properties:
       # V2 listener ARN, or Classic frontend port scoped to the enclosing load balancer ARN.
@@ -71,11 +75,18 @@ types:
       protocol: optional<Protocol>
       port: optional<integer>
       certificates: optional<list<Certificate>>
+      # V2 default forward actions only; excludes non-default listener rules.
+      # Configured references, including zero-weight targets, not proof of active forwarding.
+      defaultForwardTargetGroups: optional<list<ForwardTargetGroup>>
+      # Classic backend settings belong to this listener, not to every listener on the LB.
+      backendPort: optional<integer>
+      backendProtocol: optional<Protocol>
   Target:
     properties:
       # AWS target ID, interpreted using type and the enclosing load balancer/target-group scope.
       id: string
       type: TargetType
+      # V2 registered target port only. Classic backend ports are listener-specific.
       port: optional<integer>
       availabilityZone: optional<string>
 # TargetGroup High level structs
