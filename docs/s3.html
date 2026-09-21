@@ -832,6 +832,15 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#access-and-encryption-signals" class="md-nav__link">
+    <span class="md-ellipsis">
+      Access and Encryption Signals
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#usage_1" class="md-nav__link">
     <span class="md-ellipsis">
       Usage
@@ -1277,6 +1286,15 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#access-and-encryption-signals" class="md-nav__link">
+    <span class="md-ellipsis">
+      Access and Encryption Signals
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#usage_1" class="md-nav__link">
     <span class="md-ellipsis">
       Usage
@@ -1407,6 +1425,13 @@
 <h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">#</a></h2>
 <h3 id="enumerate">Enumerate<a class="headerlink" href="#enumerate" title="Permanent link">#</a></h3>
 <p>The enumerate command will gather information about all of the S3 buckets that the provided credentials have access to.</p>
+<h4 id="access-and-encryption-signals">Access and Encryption Signals<a class="headerlink" href="#access-and-encryption-signals" title="Permanent link">#</a></h4>
+<p><code>configuration.accessControl.allowPublicList</code> describes bucket-level listing permissions from the collected ACL and policy.
+<code>allowPublicRead</code> describes object-read permissions from the bucket policy, not listing or individual object ACLs.
+Bucket ACL <code>READ</code> and <code>FULL_CONTROL</code> grants populate listing permissions, including <code>allowAuthenticatedUsersList</code> for the
+AuthenticatedUsers group. These are configuration assessments, not proof of successful access to every object.</p>
+<p>Each encryption rule retains the reported <code>kmsKeyIdentifier</code>, including aliases and bare key IDs. The separate <code>kmsKey</code>
+reference is populated only for a concrete key ARN; aliases are not resolved or treated as key ARNs.</p>
 <h4 id="usage_1">Usage<a class="headerlink" href="#usage_1" title="Permanent link">#</a></h4>
 <div class="highlight"><pre><span></span><code>methodaws<span class="w"> </span>s3<span class="w"> </span>enumerate<span class="w"> </span>--regions<span class="w"> </span>us-east-1<span class="w"> </span>--output<span class="w"> </span>json
 </code></pre></div>
@@ -1451,6 +1476,9 @@ Global<span class="w"> </span>Flags:
 </code></pre></div>
 <h3 id="external">external<a class="headerlink" href="#external" title="Permanent link">#</a></h3>
 <p>The external command attempts to enumerate a public facing S3 bucket with anonymous credentials from an external perspective.</p>
+<p><code>allowDirectoryListing</code> and <code>allowAnonymousRead</code> report anonymous probe results. Entries in <code>acls</code> describe the returned
+bucket ACL grants, not effective access after all applicable controls. A missing bucket policy is normal; failed optional
+policy or ACL requests are reported without discarding the identified bucket.</p>
 <h4 id="usage_3">Usage<a class="headerlink" href="#usage_3" title="Permanent link">#</a></h4>
 <div class="highlight"><pre><span></span><code>methodaws<span class="w"> </span>s3<span class="w"> </span>external<span class="w"> </span>--url<span class="w"> </span>https://bucketname.s3.amazonaws.com<span class="w"> </span>--output<span class="w"> </span>json
 </code></pre></div>
