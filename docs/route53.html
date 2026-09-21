@@ -1251,6 +1251,11 @@
 <h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">#</a></h2>
 <h3 id="enumerate">Enumerate<a class="headerlink" href="#enumerate" title="Permanent link">#</a></h3>
 <p>The enumerate command will gather information about all of the Route53 hosted zones and DNS entries, that the provided credentials have access to.</p>
+<p>Each hosted zone has its own <code>identification</code> (required ARN, canonical ID, and name),
+<code>configuration</code> (including public/private status when returned), and <code>resources.recordSets</code>.
+Hosted-zone ARNs use the configured AWS partition and contain neither an account ID nor a region.
+Record sets remain nested under their owning zone. Alias targets retain their reported DNS name and
+target hosted-zone ID; no load balancer, distribution, or other resource ARN is inferred from a hostname.</p>
 <h4 id="usage_1">Usage<a class="headerlink" href="#usage_1" title="Permanent link">#</a></h4>
 <div class="highlight"><pre><span></span><code>methodaws<span class="w"> </span>route53<span class="w"> </span>enumerate<span class="w"> </span>--regions<span class="w"> </span>us-east-1<span class="w"> </span>--output<span class="w"> </span>json
 </code></pre></div>
