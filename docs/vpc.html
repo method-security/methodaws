@@ -1251,6 +1251,8 @@
 <h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">#</a></h2>
 <h3 id="enumerate">Enumerate<a class="headerlink" href="#enumerate" title="Permanent link">#</a></h3>
 <p>The enumerate command will gather information about all of the VPCs that the provided credentials have access to.</p>
+<p>VPCs and subnets include native IDs and required ARNs. VPC ARNs are constructed using the reported owner account and region, not the caller's account. Returned subnet ARNs are validated; when absent, they are constructed from the reported subnet owner and region.</p>
+<p>Resources without a complete identity are skipped and reported as errors. Subnets whose parent VPC was not collected are also skipped; enumeration does not create incomplete parent VPCs. Errors preserve valid results already collected and do not prevent enumeration of other regions.</p>
 <h4 id="usage_1">Usage<a class="headerlink" href="#usage_1" title="Permanent link">#</a></h4>
 <div class="highlight"><pre><span></span><code>methodaws<span class="w"> </span>vpc<span class="w"> </span>enumerate<span class="w"> </span>--regions<span class="w"> </span>us-east-1<span class="w"> </span>--output<span class="w"> </span>json
 </code></pre></div>

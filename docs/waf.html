@@ -1324,22 +1324,22 @@ methodaws<span class="w"> </span>waf<span class="w"> </span>enumerate<span class
 <p>The WAF enumerate command gathers information about:</p>
 <ul>
 <li>WAF Web ACLs</li>
-<li>WAF rules and rule groups</li>
-<li>WAF IP sets and regex pattern sets</li>
-<li>WAF rate-based rules</li>
-<li>Associated resources (CloudFront distributions, Application Load Balancers, API Gateway)</li>
-<li>WAF logging configurations</li>
-<li>WAF managed rule groups</li>
+<li>Web ACL default actions and configured rules, including priorities, statements, actions, overrides, and labels</li>
+<li>Associated Application Load Balancer and CloudFront distribution references</li>
+<li>API Gateway stage associations, including the exact stage ARN and parent API reference</li>
 </ul>
+<p>Rules include a required scoped ID formed from the parent Web ACL ARN and rule name. This is not an AWS-issued rule ARN. Rule-group references report <code>overrideAction</code> (<code>NONE</code> or <code>COUNT</code>) separately from direct rule actions. Invalid action combinations are reported as errors and skipped.</p>
+<p><code>resources</code> contains rule objects and load balancer/distribution references. Stage-scoped associations are retained under <code>configuration.apiGatewayStageAssociations</code>; they do not imply that every stage of an API is protected. CloudFront distributions are global resources and their references omit <code>region</code>.</p>
+<p>CloudFront associations use <code>cloudfront:ListDistributionsByWebACLId</code>. If this lookup fails, the Web ACL and previously collected associations are retained with an error. Referenced rule groups, IP sets, and regex sets are not expanded into separate inventories.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">#</a></h2>
 <p>The output includes detailed information about your WAF resources and their configurations in the specified output format (signal, json).</p>
 <h2 id="security-considerations">Security Considerations<a class="headerlink" href="#security-considerations" title="Permanent link">#</a></h2>
 <p>When enumerating WAF resources, methodaws will collect:
 - Web ACL configurations and rules
-- IP allow/block lists
+- Reported matching statements and referenced set identifiers
 - Rate limiting configurations
 - Associated protected resources
-- Logging and monitoring settings</p>
+- Per-rule settings preserved in the raw rule configuration</p>
 <p>This information is valuable for security assessments and ensuring proper web application protection is in place.</p>
 
 
