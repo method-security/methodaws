@@ -8,7 +8,9 @@ import (
 
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	vpcfern "github.com/Method-Security/methodaws/generated/go/vpc"
+	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -133,14 +135,8 @@ func enumerateVPCWithSubnetsForRegion(ctx context.Context, cfg aws.Config, regio
 			}
 			vpcInstance, exists := vpcMap[*subnet.VpcId]
 			if !exists {
-				// The subnet supplies the parent identity, but not the parent's configuration or owner.
-				vpcInstance = &vpcfern.VpcInstance{
-					Identification: &vpcfern.VpcIdentificationInfo{Id: *subnet.VpcId, Region: region},
-					Configuration:  &vpcfern.VpcConfigurationInfo{},
-				}
-				vpcMap[*subnet.VpcId] = vpcInstance
-				vpcs = append(vpcs, vpcInstance)
-				errors = append(errors, fmt.Sprintf("VPC %s in %s details unavailable; retaining parent identity reported by subnets", *subnet.VpcId, region))
+				errors = append(errors, fmt.Sprintf("Skipping subnet %s in %s: parent VPC %s was not collected with a complete identity", subnetConverted.Identification.Id, region, *subnet.VpcId))
+				continue
 			}
 			if vpcInstance.Resources == nil {
 				vpcInstance.Resources = &vpcfern.VpcResourceInfo{}
@@ -157,6 +153,10 @@ func convertAWSVPCToFern(awsVPC ec2types.Vpc, region string) (*vpcfern.VpcInstan
 	errors := []string{}
 	if !hasValue(awsVPC.VpcId) || strings.TrimSpace(region) == "" {
 		return nil, []string{fmt.Sprintf("Cannot identify VPC: missing VPC ID or region (id=%q, region=%q)", aws.ToString(awsVPC.VpcId), region)}
+	}
+	vpcARN, err := resourceARN(region, "vpc", *awsVPC.VpcId, awsVPC.OwnerId, nil)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("Cannot identify VPC %s in %s: %v", *awsVPC.VpcId, region, err)}
 	}
 
 	// Convert AWS VPC tags to Fern tags and extract name
@@ -231,6 +231,7 @@ func convertAWSVPCToFern(awsVPC ec2types.Vpc, region string) (*vpcfern.VpcInstan
 	vpc := &vpcfern.VpcInstance{
 		Identification: &vpcfern.VpcIdentificationInfo{
 			Id:     *awsVPC.VpcId,
+			Arn:    vpcARN,
 			Region: region,
 			Name:   name,
 		},
@@ -257,6 +258,10 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 	errors := []string{}
 	if !hasValue(awsSubnet.SubnetId) || strings.TrimSpace(region) == "" {
 		return nil, []string{fmt.Sprintf("Cannot identify subnet: missing subnet ID or region (id=%q, region=%q)", aws.ToString(awsSubnet.SubnetId), region)}
+	}
+	subnetARN, err := resourceARN(region, "subnet", *awsSubnet.SubnetId, awsSubnet.OwnerId, awsSubnet.SubnetArn)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("Cannot identify subnet %s in %s: %v", *awsSubnet.SubnetId, region, err)}
 	}
 	// Convert AWS Subnet tags to Fern tags and extract name
 	var tags []*common.Tag
@@ -350,7 +355,7 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 	subnet := &vpcfern.Subnet{
 		Identification: &vpcfern.SubnetIdentificationInfo{
 			Id:     *awsSubnet.SubnetId,
-			Arn:    awsSubnet.SubnetArn,
+			Arn:    subnetARN,
 			Name:   name,
 			Region: region,
 		},
@@ -382,6 +387,32 @@ func convertAWSSubnetToFern(awsSubnet ec2types.Subnet, region string) (*vpcfern.
 
 func hasValue(value *string) bool {
 	return value != nil && strings.TrimSpace(*value) != ""
+}
+
+// Resource ownership comes from the response, never the caller's account.
+func resourceARN(region, resourceType, id string, ownerID, reportedARN *string) (string, error) {
+	owner := strings.TrimSpace(aws.ToString(ownerID))
+	if reportedARN != nil {
+		parsed, err := arn.Parse(*reportedARN)
+		if err != nil || strings.TrimSpace(parsed.AccountID) == "" {
+			return "", fmt.Errorf("invalid %s ARN %q", resourceType, *reportedARN)
+		}
+		if owner != "" && parsed.AccountID != owner {
+			return "", fmt.Errorf("%s ARN owner does not match reported owner", resourceType)
+		}
+		expected, err := utils.BuildRegionalARN(region, "ec2", parsed.AccountID, resourceType+"/"+id)
+		if err != nil {
+			return "", err
+		}
+		if *reportedARN != expected {
+			return "", fmt.Errorf("%s ARN does not match its resource ID, region, service or partition", resourceType)
+		}
+		return expected, nil
+	}
+	if owner == "" {
+		return "", fmt.Errorf("missing owner account ID for %s ARN", resourceType)
+	}
+	return utils.BuildRegionalARN(region, "ec2", owner, resourceType+"/"+id)
 }
 
 func validatedCIDR(value *string, ipv6 bool) (*string, error) {
