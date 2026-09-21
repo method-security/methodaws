@@ -13,6 +13,12 @@ methodaws route53 [command]
 
 The enumerate command will gather information about all of the Route53 hosted zones and DNS entries, that the provided credentials have access to.
 
+Each hosted zone has its own `identification` (required ARN, canonical ID, and name),
+`configuration` (including public/private status when returned), and `resources.recordSets`.
+Hosted-zone ARNs use the configured AWS partition and contain neither an account ID nor a region.
+Record sets remain nested under their owning zone. Alias targets retain their reported DNS name and
+target hosted-zone ID; no load balancer, distribution, or other resource ARN is inferred from a hostname.
+
 #### Usage
 
 ```bash
