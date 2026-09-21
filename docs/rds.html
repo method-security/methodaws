@@ -1251,6 +1251,18 @@
 <h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">#</a></h2>
 <h3 id="enumerate">Enumerate<a class="headerlink" href="#enumerate" title="Permanent link">#</a></h3>
 <p>The enumerate command will gather information about all of the RDS databases, that the provided credentials have access to.</p>
+<p>The signal includes configured IAM role associations, including their feature and association status.
+These associations are separate from the Enhanced Monitoring role and IAM database authentication settings;
+they do not establish effective permissions.</p>
+<p>Network references include the resource ARN and the owner account reported by EC2. Shared VPCs and subnets
+are not assumed to belong to the database's account. This enrichment requires <code>ec2:DescribeVpcs</code>,
+<code>ec2:DescribeSubnets</code>, and <code>ec2:DescribeSecurityGroups</code> in addition to <code>rds:DescribeDBInstances</code>.
+Lookups target referenced IDs and are cached per region for the duration of enumeration.
+Failed lookups are reported as errors; the database is retained and the unresolved resource reference is omitted.
+<code>dbSubnetGroupSubnetIds</code> retains the IDs reported by RDS, while <code>resources.dbSubnetGroupSubnets</code> contains
+only resolved references. Both describe configured subnet-group membership, not active instance attachments.
+The resource fields use distinct <code>RdsVpcReference</code>, <code>RdsSubnetReference</code>, and <code>RdsSecurityGroupReference</code>
+types so consumers can map each reference directly to its resource type.</p>
 <h4 id="usage_1">Usage<a class="headerlink" href="#usage_1" title="Permanent link">#</a></h4>
 <div class="highlight"><pre><span></span><code>methodaws<span class="w"> </span>rds<span class="w"> </span>enumerate<span class="w"> </span>--regions<span class="w"> </span>us-east-1<span class="w"> </span>--output<span class="w"> </span>json
 </code></pre></div>
