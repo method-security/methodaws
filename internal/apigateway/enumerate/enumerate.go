@@ -3,7 +3,6 @@ package apigateway
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
@@ -14,8 +13,6 @@ import (
 )
 
 const lambdaInvocationResourceMarker = "functions/"
-
-var iamAccountIDPattern = regexp.MustCompile(`^[0-9]{12}$`)
 
 // EnumerateAPIGateway enumerates API Gateways based on the provided configuration
 func EnumerateAPIGateway(ctx context.Context, awsConfig aws.Config, config apigatewayfern.ApiGatewayEnumerateConfig) *apigatewayfern.ApiGatewayEnumerateReport {
@@ -93,7 +90,7 @@ func executionRoleFromCredentials(credentials string) (*common.IamRoleReference,
 	}
 	roleName := parsed.Resource[strings.LastIndex(parsed.Resource, "/")+1:]
 	if parsed.Partition == "" || parsed.Service != "iam" || parsed.Region != "" ||
-		!iamAccountIDPattern.MatchString(parsed.AccountID) || !strings.HasPrefix(parsed.Resource, "role/") ||
+		parsed.AccountID == "" || !strings.HasPrefix(parsed.Resource, "role/") ||
 		roleName == "" || strings.ContainsAny(credentials, "*? \t\r\n") {
 		return nil, fmt.Errorf("integration credentials do not identify a concrete IAM role")
 	}

@@ -5,6 +5,7 @@ import (
 	// Standard
 	"context"
 	"fmt"
+	"strings"
 
 	// Generated
 	common "github.com/Method-Security/methodaws/generated/go/common"
@@ -13,6 +14,7 @@ import (
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/rds/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -87,9 +89,11 @@ func enumerateRDSForRegion(ctx context.Context, awsConfig aws.Config, region str
 	log.Info("Successfully listed RDS instances", svc1log.SafeParam("count", len(instances)))
 
 	var rdsInstances []*rdsfern.RdsInstance
+	networks := newNetworkResolver(ec2.NewFromConfig(awsConfig), region)
 	for _, instance := range instances {
 		rdsInstance, errs := convertAWSDBInstanceToFern(instance, region)
 		if rdsInstance != nil {
+			errs = append(errs, networks.enrich(ctx, instance, rdsInstance)...)
 			rdsInstances = append(rdsInstances, rdsInstance)
 		}
 		for _, err := range errs {
@@ -170,7 +174,7 @@ func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsf
 		}
 	}
 
-	// VPC References (minimal VPC info to avoid duplication with VPC enumeration)
+	// Preserve reported subnet membership even when EC2 identity enrichment fails.
 	if instance.DBSubnetGroup != nil {
 		var subnetIds []string
 		for _, subnet := range instance.DBSubnetGroup.Subnets {
@@ -182,12 +186,7 @@ func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsf
 		}
 		dbInstance.Configuration.DbSubnetGroupSubnetIds = subnetIds
 
-		if aws.ToString(instance.DBSubnetGroup.VpcId) != "" {
-			dbInstance.Resources.Vpc = &common.VpcReference{
-				Id:     *instance.DBSubnetGroup.VpcId,
-				Region: region,
-			}
-		} else {
+		if aws.ToString(instance.DBSubnetGroup.VpcId) == "" {
 			errors = append(errors, "DB subnet group is missing its VPC ID")
 		}
 	}
@@ -219,15 +218,9 @@ func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsf
 		Iops:                iops,
 	}
 
-	// Security Configuration - create SecurityGroupReference objects
-	var securityGroups []*common.SecurityGroupReference
+	// Network references are emitted only after EC2 establishes their owner.
 	for _, sg := range instance.VpcSecurityGroups {
-		if aws.ToString(sg.VpcSecurityGroupId) != "" {
-			securityGroups = append(securityGroups, &common.SecurityGroupReference{
-				Id:     *sg.VpcSecurityGroupId,
-				Region: region,
-			})
-		} else {
+		if aws.ToString(sg.VpcSecurityGroupId) == "" {
 			errors = append(errors, "VPC security group membership is missing its ID")
 		}
 	}
@@ -237,8 +230,20 @@ func convertAWSDBInstanceToFern(instance types.DBInstance, region string) (*rdsf
 		KmsKeyId:                         instance.KmsKeyId,
 	}
 
-	// Set security groups in Resources
-	dbInstance.Resources.SecurityGroups = securityGroups
+	for _, role := range instance.AssociatedRoles {
+		roleARN, err := arn.Parse(aws.ToString(role.RoleArn))
+		if err != nil || roleARN.Partition != instanceARN.Partition || roleARN.Service != "iam" ||
+			roleARN.AccountID == "" || roleARN.Region != "" ||
+			!strings.HasPrefix(roleARN.Resource, "role/") || strings.TrimPrefix(roleARN.Resource, "role/") == "" ||
+			strings.HasSuffix(roleARN.Resource, "/") {
+			errors = append(errors, fmt.Sprintf("invalid associated IAM role ARN %q", aws.ToString(role.RoleArn)))
+			continue
+		}
+		roleName := roleARN.Resource[strings.LastIndex(roleARN.Resource, "/")+1:]
+		dbInstance.Resources.IamRoles = append(dbInstance.Resources.IamRoles, &rdsfern.RdsIamRoleAssociation{
+			Arn: roleARN.String(), RoleName: &roleName, FeatureName: role.FeatureName, Status: role.Status,
+		})
+	}
 
 	// Monitoring Configuration
 	var monitoringInterval *int
