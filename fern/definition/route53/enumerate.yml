@@ -71,6 +71,8 @@ types:
 # Hosted Zone High level Structs
   HostedZoneIdentificationInfo:
     properties:
+      # Global hosted-zone ARN; contains neither account ID nor region.
+      arn: string
       # Canonical AWS zone ID without the /hostedzone/ API path prefix.
       id: string
       name: string

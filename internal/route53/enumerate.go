@@ -10,6 +10,7 @@ import (
 	// Generated
 	route53fern "github.com/Method-Security/methodaws/generated/go/route53"
 	// Internal
+	"github.com/Method-Security/methodaws/utils"
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/route53"
@@ -21,7 +22,7 @@ const (
 	REGION = "us-east-1"
 )
 
-func listHostedZones(ctx context.Context, route53Client *route53.Client) ([]route53fern.EnrichedHostedZone, []string) {
+func listHostedZones(ctx context.Context, route53Client *route53.Client, region string) ([]route53fern.EnrichedHostedZone, []string) {
 	log := svc1log.FromContext(ctx)
 	var zones []route53fern.EnrichedHostedZone
 	var errors []string
@@ -45,8 +46,14 @@ func listHostedZones(ctx context.Context, route53Client *route53.Client) ([]rout
 				errors = append(errors, fmt.Sprintf("Route53 hosted zone %q (%q) has an incomplete identity", aws.ToString(hostedZone.Name), aws.ToString(hostedZone.Id)))
 				continue
 			}
+			zoneARN, err := utils.BuildGlobalARNForRegion(region, "route53", "", "hostedzone/"+zoneID)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("Route53 hosted zone %q (%q): %s", *hostedZone.Name, zoneID, err))
+				continue
+			}
 			// Prepare identification info
 			identification := &route53fern.HostedZoneIdentificationInfo{
+				Arn:  zoneARN,
 				Id:   zoneID,
 				Name: *hostedZone.Name,
 			}
@@ -287,7 +294,7 @@ func EnumerateRoute53(ctx context.Context, awscfg aws.Config, config route53fern
 	route53Client := route53.NewFromConfig(awscfg)
 
 	// List hosted zones
-	hostedZones, zoneErrors := listHostedZones(ctx, route53Client)
+	hostedZones, zoneErrors := listHostedZones(ctx, route53Client, awscfg.Region)
 	if len(zoneErrors) > 0 {
 		log.Warn("Errors occurred while listing hosted zones",
 			svc1log.SafeParam("region", awscfg.Region),
