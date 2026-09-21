@@ -24,18 +24,20 @@ func TestHostedZoneIdentityAndNestedRecords(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/xml")
 				if strings.HasSuffix(r.URL.Path, "/rrset") {
-					fmt.Fprint(w, `<ListResourceRecordSetsResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+					_, err := fmt.Fprint(w, `<ListResourceRecordSetsResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
 <ResourceRecordSets><ResourceRecordSet><Name>app.example.com.</Name><Type>A</Type>
 <AliasTarget><DNSName>example.us-east-1.elb.amazonaws.com.</DNSName><HostedZoneId>ZTARGET</HostedZoneId><EvaluateTargetHealth>false</EvaluateTargetHealth></AliasTarget>
 </ResourceRecordSet></ResourceRecordSets><IsTruncated>false</IsTruncated><MaxItems>100</MaxItems>
 </ListResourceRecordSetsResponse>`)
+					assert.NoError(t, err)
 					return
 				}
-				fmt.Fprint(w, `<ListHostedZonesResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+				_, err := fmt.Fprint(w, `<ListHostedZonesResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
 <HostedZones><HostedZone><Id>/hostedzone/Z123</Id><Name>example.com.</Name><CallerReference>test</CallerReference>
 <Config><PrivateZone>true</PrivateZone></Config><ResourceRecordSetCount>1</ResourceRecordSetCount>
 </HostedZone></HostedZones><IsTruncated>false</IsTruncated><MaxItems>100</MaxItems>
 </ListHostedZonesResponse>`)
+				assert.NoError(t, err)
 			}))
 			defer server.Close()
 			client := route53.NewFromConfig(aws.Config{
