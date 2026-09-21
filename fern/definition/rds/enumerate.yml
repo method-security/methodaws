@@ -39,6 +39,21 @@ types:
       preferredMaintenanceWindow: optional<string>
       copyTagsToSnapshot: optional<boolean>
       latestRestorableTime: optional<datetime>
+  RdsIamRoleAssociation:
+    properties:
+      arn: string
+      roleName: optional<string>
+      featureName: optional<string>
+      # Reported association state, not proof of effective permissions.
+      status: optional<string>
+  RdsNetworkResourceReference:
+    properties:
+      arn: string
+      id: string
+      region: string
+      # Reported by EC2; may differ from the database's account in a shared VPC.
+      ownerId: string
+      name: optional<string>
 # VPC High level structs
   VpcInstance:
     properties:
@@ -78,9 +93,11 @@ types:
       tags: optional<list<common.Tag>>
   RdsResourceInfo:
     properties:
-      vpc: optional<common.VpcReference>
-      securityGroups: optional<list<common.SecurityGroupReference>>
-      iamRoles: optional<list<common.IamRoleReference>>
+      vpc: optional<RdsNetworkResourceReference>
+      securityGroups: optional<list<RdsNetworkResourceReference>>
+      # Configured subnet-group members, not active instance attachments.
+      dbSubnetGroupSubnets: optional<list<RdsNetworkResourceReference>>
+      iamRoles: optional<list<RdsIamRoleAssociation>>
       kmsKeys: optional<list<common.KmsKeyReference>>
 # Main RDS Structs
   RdsInstance:

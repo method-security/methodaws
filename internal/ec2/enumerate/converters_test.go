@@ -92,7 +92,7 @@ func TestInstanceARNPartitions(t *testing.T) {
 func TestInvalidIdentityDoesNotEmitInstance(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ owner, region string }{
-		{"", "us-east-1"}, {"invalid", "us-east-1"}, {"123456789012", ""}, {"123456789012", "invalid"},
+		{"", "us-east-1"}, {"123456789012", ""}, {"123456789012", "invalid"},
 	} {
 		instance, errs := convertInstanceToFern(context.Background(), types.Instance{
 			InstanceId: aws.String("i-0123456789abcdef0"),

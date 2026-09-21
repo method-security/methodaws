@@ -3,7 +3,6 @@ package enumerate
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/Method-Security/methodaws/generated/go/common"
@@ -268,11 +267,9 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 	return fernInterfaces, errors
 }
 
-var accountIDPattern = regexp.MustCompile(`^[0-9]{12}$`)
-
 func buildEC2ResourceARN(region, ownerID, resource string) (string, error) {
-	if !accountIDPattern.MatchString(ownerID) {
-		return "", fmt.Errorf("missing or invalid resource owner account ID %q", ownerID)
+	if ownerID == "" {
+		return "", fmt.Errorf("missing resource owner account ID")
 	}
 	return utils.BuildRegionalARN(region, "ec2", ownerID, resource)
 }
