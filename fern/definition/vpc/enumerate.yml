@@ -55,7 +55,7 @@ types:
   SubnetIdentificationInfo:
     properties:
       id: string
-      arn: optional<string>
+      arn: string
       name: optional<string>
       region: string
   SubnetConfigurationInfo:
@@ -89,6 +89,7 @@ types:
   VpcIdentificationInfo:
     properties:
       id: string
+      arn: string
       region: string
       name: optional<string>
   VpcConfigurationInfo:

@@ -13,6 +13,10 @@ methodaws vpc [command]
 
 The enumerate command will gather information about all of the VPCs that the provided credentials have access to.
 
+VPCs and subnets include native IDs and required ARNs. VPC ARNs are constructed using the reported owner account and region, not the caller's account. Returned subnet ARNs are validated; when absent, they are constructed from the reported subnet owner and region.
+
+Resources without a complete identity are skipped and reported as errors. Subnets whose parent VPC was not collected are also skipped; enumeration does not create incomplete parent VPCs. Errors preserve valid results already collected and do not prevent enumeration of other regions.
+
 #### Usage
 
 ```bash
