@@ -59,7 +59,7 @@ types:
     properties:
       arn: string
       domainName: optional<string>
-      region: string
+      region: optional<string>
 # Load Balancer Resources
   LoadBalancerReference:
     properties:

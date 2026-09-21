@@ -12,6 +12,7 @@ import (
 	methodawsutils "github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
+	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2/types"
 	"github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -61,6 +62,12 @@ func EnumerateWAF(ctx context.Context, awsConfig aws.Config, config waffern.WafE
 			waffern.ScopeTypeCloudfront,
 		)
 		allErrors = append(allErrors, cloudFrontErrors...)
+		cloudFrontClient := cloudfront.NewFromConfig(cloudFrontConfig)
+		for _, webACL := range cloudFrontWAFs {
+			distributions, errs := distributionsForWebACL(ctx, cloudFrontClient, webACL.Identification.Arn)
+			webACL.Resources.CloudFrontDistributions = distributions
+			allErrors = append(allErrors, errs...)
+		}
 		allWafs = append(allWafs, cloudFrontWAFs...)
 	}
 
@@ -135,7 +142,11 @@ func enumerateWAFForScope(
 			break
 		}
 		allWebACLs = append(allWebACLs, webACLsOutput.WebACLs...)
-		if webACLsOutput.NextMarker == nil {
+		if !hasValue(webACLsOutput.NextMarker) {
+			break
+		}
+		if aws.ToString(nextMarker) == *webACLsOutput.NextMarker {
+			errors = append(errors, "ListWebACLs returned a repeated pagination marker")
 			break
 		}
 		nextMarker = webACLsOutput.NextMarker
@@ -152,7 +163,7 @@ func enumerateWAFForScope(
 		}
 
 		// Get the rules for the WAF
-		rules, defaultAction, errs := getRules(ctx, wafClient, awsScope, webACL.Id, webACL.Name)
+		rules, defaultAction, errs := getRules(ctx, wafClient, awsScope, webACL.Id, webACL.Name, webACLARN.String())
 		for _, err := range errs {
 			errors = append(errors, fmt.Sprintf("WebACL %s: %s", webACLARN.String(), err))
 		}
@@ -161,12 +172,13 @@ func enumerateWAFForScope(
 		resourceInfo := &waffern.WafResourceInfo{
 			Rules: rules,
 		}
+		var stageAssociations []*waffern.ApiGatewayStageAssociation
 
 		if awsScope == types.ScopeRegional {
 			resourceArns, resourceErrors := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
 			errors = append(errors, resourceErrors...)
 			var referenceErrors []string
-			resourceInfo.LoadBalancers, resourceInfo.ApiGatewayStages, referenceErrors = referencesFromResourceARNs(resourceArns, webACLARN)
+			resourceInfo.LoadBalancers, stageAssociations, referenceErrors = referencesFromResourceARNs(resourceArns, webACLARN)
 			for _, err := range referenceErrors {
 				errors = append(errors, fmt.Sprintf("WebACL %s: %s", webACLARN.String(), err))
 			}
@@ -179,9 +191,10 @@ func enumerateWAFForScope(
 				Region: region,
 			},
 			Configuration: &waffern.WafConfigurationInfo{
-				Scope:         fernScope,
-				Description:   webACL.Description,
-				DefaultAction: defaultAction,
+				Scope:                       fernScope,
+				Description:                 webACL.Description,
+				DefaultAction:               defaultAction,
+				ApiGatewayStageAssociations: stageAssociations,
 			},
 			Resources: resourceInfo,
 		}
@@ -192,7 +205,7 @@ func enumerateWAFForScope(
 }
 
 // getRules gets the rules for a given WebACL
-func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId, webACLName *string) ([]*waffern.RuleInfo, *waffern.ActionType, []string) {
+func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId, webACLName *string, webACLARN string) ([]*waffern.RuleInfo, *waffern.ActionType, []string) {
 	log := svc1log.FromContext(ctx)
 	if !hasValue(webACLId) || !hasValue(webACLName) {
 		return nil, nil, []string{"Cannot call GetWebACL without its ID and name"}
@@ -222,6 +235,11 @@ func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId
 			errors = append(errors, fmt.Sprintf("WAF Rule %s Statement is nil", *rule.Name))
 			continue
 		}
+		actionType, overrideAction, err := ruleActions(rule)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("WAF rule %s: %v", *rule.Name, err))
+			continue
+		}
 		ruleJSON, err := json.Marshal(rule)
 		if err != nil {
 			errors = append(errors, err.Error())
@@ -246,14 +264,21 @@ func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId
 			actionJSONStr := string(actionJSON)
 			actionJSONString = &actionJSONStr
 			actionInfo = &waffern.ActionInfo{
-				Type:       getActionType(rule.Action),
+				Type:       *actionType,
 				JsonString: actionJSONString,
+			}
+		}
+		var labels []string
+		for _, label := range rule.RuleLabels {
+			if hasValue(label.Name) {
+				labels = append(labels, *label.Name)
 			}
 		}
 
 		statementJSONString := string(statementJSON)
 		ruleInfo := waffern.RuleInfo{
 			Identification: &waffern.RuleIdentificationInfo{
+				Id:   webACLARN + "/rule/" + *rule.Name,
 				Name: aws.ToString(rule.Name),
 			},
 			Configuration: &waffern.RuleConfigurationInfo{
@@ -262,8 +287,10 @@ func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId
 					Type:         getStatementType(rule.Statement),
 					RawStatement: &statementJSONString,
 				},
-				Action:  actionInfo,
-				RawRule: string(ruleJSON),
+				Action:         actionInfo,
+				OverrideAction: overrideAction,
+				Labels:         labels,
+				RawRule:        string(ruleJSON),
 			},
 		}
 		rules = append(rules, &ruleInfo)
@@ -272,22 +299,42 @@ func getRules(ctx context.Context, wafClient wafAPI, scope types.Scope, webACLId
 	return rules, defaultActionType, errors
 }
 
-// getActionType gets the action type for a given RuleAction
-func getActionType(action *types.RuleAction) waffern.ActionType {
-	switch {
-	case action.Allow != nil:
-		return waffern.ActionTypeAllow
-	case action.Block != nil:
-		return waffern.ActionTypeBlock
-	case action.Captcha != nil:
-		return waffern.ActionTypeCaptcha
-	case action.Challenge != nil:
-		return waffern.ActionTypeChallenge
-	case action.Count != nil:
-		return waffern.ActionTypeCount
-	default:
-		return waffern.ActionTypeOther
+func ruleActions(rule types.Rule) (*waffern.ActionType, *waffern.OverrideActionType, error) {
+	isGroup := rule.Statement.ManagedRuleGroupStatement != nil || rule.Statement.RuleGroupReferenceStatement != nil
+	if isGroup {
+		if rule.Action != nil || rule.OverrideAction == nil ||
+			(rule.OverrideAction.None == nil) == (rule.OverrideAction.Count == nil) {
+			return nil, nil, fmt.Errorf("rule group reference requires exactly one override action and no direct action")
+		}
+		override := waffern.OverrideActionTypeNone
+		if rule.OverrideAction.Count != nil {
+			override = waffern.OverrideActionTypeCount
+		}
+		return nil, &override, nil
 	}
+	if rule.Action == nil || rule.OverrideAction != nil {
+		return nil, nil, fmt.Errorf("non-group rule requires a direct action and no override action")
+	}
+	var actions []waffern.ActionType
+	if rule.Action.Allow != nil {
+		actions = append(actions, waffern.ActionTypeAllow)
+	}
+	if rule.Action.Block != nil {
+		actions = append(actions, waffern.ActionTypeBlock)
+	}
+	if rule.Action.Captcha != nil {
+		actions = append(actions, waffern.ActionTypeCaptcha)
+	}
+	if rule.Action.Challenge != nil {
+		actions = append(actions, waffern.ActionTypeChallenge)
+	}
+	if rule.Action.Count != nil {
+		actions = append(actions, waffern.ActionTypeCount)
+	}
+	if len(actions) != 1 {
+		return nil, nil, fmt.Errorf("rule must specify exactly one supported action")
+	}
+	return &actions[0], nil, nil
 }
 
 // getDefaultActionType gets the default action type for a given DefaultAction

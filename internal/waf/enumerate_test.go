@@ -124,12 +124,12 @@ func TestEnumerateWAFForScopePaginatesAndListsAssociationsOnce(t *testing.T) {
 		wafs[0].Resources.LoadBalancers[0].Arn)
 	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/second/def",
 		wafs[0].Resources.LoadBalancers[1].Arn)
-	require.Len(t, wafs[0].Resources.ApiGatewayStages, 2)
-	assert.Equal(t, "first-api", *wafs[0].Resources.ApiGatewayStages[0].Api.ApiId)
-	assert.Equal(t, "second-api", *wafs[0].Resources.ApiGatewayStages[1].Api.ApiId)
-	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api", wafs[0].Resources.ApiGatewayStages[0].Api.Arn)
-	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api/stages/prod", wafs[0].Resources.ApiGatewayStages[0].StageArn)
-	assert.Equal(t, "prod", wafs[0].Resources.ApiGatewayStages[0].StageName)
+	require.Len(t, wafs[0].Configuration.ApiGatewayStageAssociations, 2)
+	assert.Equal(t, "first-api", *wafs[0].Configuration.ApiGatewayStageAssociations[0].Api.ApiId)
+	assert.Equal(t, "second-api", *wafs[0].Configuration.ApiGatewayStageAssociations[1].Api.ApiId)
+	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api", wafs[0].Configuration.ApiGatewayStageAssociations[0].Api.Arn)
+	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api/stages/prod", wafs[0].Configuration.ApiGatewayStageAssociations[0].StageArn)
+	assert.Equal(t, "prod", wafs[0].Configuration.ApiGatewayStageAssociations[0].StageName)
 }
 
 func TestEnumerateCloudFrontWAFDoesNotListRegionalAssociations(t *testing.T) {
@@ -160,7 +160,7 @@ func TestEnumerateWAFSkipsRuleWithMissingStatement(t *testing.T) {
 			DefaultAction: &types.DefaultAction{Allow: &types.AllowAction{}},
 			Rules: []types.Rule{
 				{Name: aws.String("incomplete")},
-				{Name: aws.String("valid"), Statement: &types.Statement{ByteMatchStatement: &types.ByteMatchStatement{}}},
+				{Name: aws.String("valid"), Statement: &types.Statement{ByteMatchStatement: &types.ByteMatchStatement{}}, Action: &types.RuleAction{Allow: &types.AllowAction{}}},
 			},
 		}},
 	}
@@ -174,4 +174,38 @@ func TestEnumerateWAFSkipsRuleWithMissingStatement(t *testing.T) {
 	assert.Equal(t, "valid", wafs[0].Resources.Rules[0].Identification.Name)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "WAF Rule incomplete Statement is nil")
+}
+
+func TestRuleActionsAndScopedIdentity(t *testing.T) {
+	const parent = "arn:aws:wafv2:us-east-1:123456789012:regional/webacl/example/id"
+	client := &stubWAFClient{getOutput: &wafv2.GetWebACLOutput{WebACL: &types.WebACL{
+		DefaultAction: &types.DefaultAction{Block: &types.BlockAction{}},
+		Rules: []types.Rule{
+			{Name: aws.String("default"), Statement: &types.Statement{ByteMatchStatement: &types.ByteMatchStatement{}},
+				Action: &types.RuleAction{Allow: &types.AllowAction{}}, RuleLabels: []types.Label{{Name: aws.String("app:allowed")}}},
+			{Name: aws.String("managed"), Statement: &types.Statement{ManagedRuleGroupStatement: &types.ManagedRuleGroupStatement{}},
+				OverrideAction: &types.OverrideAction{None: &types.NoneAction{}}},
+			{Name: aws.String("count-group"), Statement: &types.Statement{RuleGroupReferenceStatement: &types.RuleGroupReferenceStatement{}},
+				OverrideAction: &types.OverrideAction{Count: &types.CountAction{}}},
+			{Name: aws.String("missing-action"), Statement: &types.Statement{ByteMatchStatement: &types.ByteMatchStatement{}}},
+			{Name: aws.String("multiple-actions"), Statement: &types.Statement{ByteMatchStatement: &types.ByteMatchStatement{}},
+				Action: &types.RuleAction{Allow: &types.AllowAction{}, Block: &types.BlockAction{}}},
+			{Name: aws.String("wrong-group-action"), Statement: &types.Statement{ManagedRuleGroupStatement: &types.ManagedRuleGroupStatement{}},
+				Action: &types.RuleAction{Allow: &types.AllowAction{}}},
+			{Name: aws.String("empty-override"), Statement: &types.Statement{ManagedRuleGroupStatement: &types.ManagedRuleGroupStatement{}},
+				OverrideAction: &types.OverrideAction{}},
+		},
+	}}}
+	rules, defaultAction, errs := getRules(context.Background(), client, types.ScopeRegional, aws.String("id"), aws.String("example"), parent)
+	require.Len(t, rules, 3)
+	require.Len(t, errs, 4)
+	require.NotNil(t, defaultAction)
+	assert.Equal(t, waffern.ActionTypeBlock, *defaultAction)
+	assert.Equal(t, parent+"/rule/default", rules[0].Identification.Id)
+	assert.Equal(t, waffern.ActionTypeAllow, rules[0].Configuration.Action.Type)
+	assert.Equal(t, []string{"app:allowed"}, rules[0].Configuration.Labels)
+	assert.Nil(t, rules[1].Configuration.Action)
+	assert.Equal(t, waffern.OverrideActionTypeNone, *rules[1].Configuration.OverrideAction)
+	assert.Equal(t, waffern.OverrideActionTypeCount, *rules[2].Configuration.OverrideAction)
+	assert.Contains(t, rules[1].Configuration.RawRule, "OverrideAction")
 }

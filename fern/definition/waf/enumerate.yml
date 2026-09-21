@@ -15,7 +15,10 @@ types:
       - CAPTCHA
       - CHALLENGE
       - COUNT
-      - OTHER
+  OverrideActionType:
+    enum:
+      - NONE
+      - COUNT
   ScopeType:
     enum:
       - REGIONAL
@@ -50,12 +53,15 @@ types:
 # Main Rule Structs
   RuleIdentificationInfo:
     properties:
+      # Parent Web ACL ARN plus /rule/<name>; a scoped ID, not an AWS-issued rule ARN.
+      id: string
       name: string
   RuleConfigurationInfo:
     properties:
       priority: integer
       statement: StatementInfo
       action: optional<ActionInfo>
+      overrideAction: optional<OverrideActionType>
       labels: optional<list<string>>
       rawRule: string
   RuleInfo:
@@ -73,6 +79,7 @@ types:
       scope: ScopeType
       description: optional<string>
       defaultAction: optional<ActionType>
+      apiGatewayStageAssociations: optional<list<ApiGatewayStageAssociation>>
   ApiGatewayStageAssociation:
     properties:
       stageArn: string
@@ -80,8 +87,8 @@ types:
       api: common.ApiGatewayReference
   WafResourceInfo:
     properties:
-      apiGatewayStages: optional<list<ApiGatewayStageAssociation>>
       loadBalancers: optional<list<common.LoadBalancerReference>>
+      cloudFrontDistributions: optional<list<common.CloudFrontDistributionReference>>
       rules: optional<list<RuleInfo>>
 # Main WAF structs
   WafInstance:
