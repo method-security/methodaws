@@ -48,18 +48,24 @@ The Load Balancer enumerate command gathers information about:
 
 ### Classic Load Balancers (V1)
 - Load balancer configurations
-- Listeners and health checks
+- Listeners with separate frontend and backend port/protocol settings
 - Instance registrations
 - Security groups
 - Subnets and availability zones
 
-### Application/Network Load Balancers (V2)
+### Application/Network/Gateway Load Balancers (V2)
 - Load balancer configurations
 - Target groups and targets
-- Listeners and rules
-- Health check configurations
+- Listeners and their default forwarding target-group references, including configured weights
+- Listener certificate references
 - Security groups and subnets
-- Access logs configuration
+
+Non-default listener rules are not collected. A target group listed under a load balancer is not automatically
+the destination of every listener. Default forwarding references include zero-weight targets and describe
+configuration, not proof of active forwarding or reachability.
+
+Classic instance registrations do not carry a target port. Use each listener's backend port and protocol;
+these settings are not copied onto all registered instances.
 
 ## Output
 
@@ -70,5 +76,5 @@ The output includes detailed information about your load balancers and their con
 When enumerating load balancers, methodaws will collect:
 - Security group associations
 - SSL/TLS certificate information
-- Target health status
+- Registered targets, without a determination of target health
 - Network configuration details

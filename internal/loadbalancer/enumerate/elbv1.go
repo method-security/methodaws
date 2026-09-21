@@ -161,19 +161,6 @@ func classicLoadBalancerIdentification(
 func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*loadbalancerfern.Target, []string) {
 	targets := []*loadbalancerfern.Target{}
 	errorMessages := []string{}
-	var instancePort *int
-	ports := make(map[int]struct{})
-	for _, description := range loadBalancer.ListenerDescriptions {
-		if description.Listener != nil && description.Listener.InstancePort != nil {
-			ports[int(*description.Listener.InstancePort)] = struct{}{}
-		}
-	}
-	if len(ports) == 1 {
-		for port := range ports {
-			portValue := port
-			instancePort = &portValue
-		}
-	}
 
 	for _, instance := range loadBalancer.Instances {
 		if aws.ToString(instance.InstanceId) == "" {
@@ -183,7 +170,6 @@ func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*lo
 		targetType := loadbalancerfern.TargetTypeInstance
 		target := &loadbalancerfern.Target{
 			Id:   *instance.InstanceId,
-			Port: instancePort,
 			Type: targetType,
 		}
 		targets = append(targets, target)
@@ -207,6 +193,22 @@ func listenersForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*
 			continue
 		}
 		fernListener := &loadbalancerfern.Listener{Id: strconv.Itoa(port), Port: &port}
+		if listener.Listener.InstancePort != nil {
+			backendPort := int(*listener.Listener.InstancePort)
+			if backendPort < 1 || backendPort > 65535 {
+				errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s listener %d has invalid backend port %d", aws.ToString(loadBalancer.LoadBalancerName), port, backendPort))
+			} else {
+				fernListener.BackendPort = &backendPort
+			}
+		}
+		if aws.ToString(listener.Listener.InstanceProtocol) != "" {
+			backendProtocol, err := loadbalancerfern.NewProtocolFromString(strings.ToUpper(*listener.Listener.InstanceProtocol))
+			if err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s listener %d backend protocol: %s", aws.ToString(loadBalancer.LoadBalancerName), port, err))
+			} else {
+				fernListener.BackendProtocol = &backendProtocol
+			}
+		}
 
 		// Convert protocol
 		if listener.Listener.Protocol != nil {

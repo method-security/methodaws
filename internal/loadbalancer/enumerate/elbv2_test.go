@@ -181,3 +181,45 @@ func TestTargetGroupIsRetainedWhenTargetHealthIsUnavailable(t *testing.T) {
 	)
 	assert.Nil(t, targetGroups[0].Resources)
 }
+
+func TestListenerDefaultForwardTargets(t *testing.T) {
+	first := "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/first/123"
+	second := "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/second/456"
+	client := &stubELBV2ResourceClient{listenerOutput: &elasticloadbalancingv2.DescribeListenersOutput{
+		Listeners: []elbv2types.Listener{{
+			ListenerArn: aws.String("listener"),
+			DefaultActions: []elbv2types.Action{
+				{Type: elbv2types.ActionTypeEnumAuthenticateOidc},
+				{Type: elbv2types.ActionTypeEnumForward, TargetGroupArn: aws.String(first),
+					ForwardConfig: &elbv2types.ForwardActionConfig{TargetGroups: []elbv2types.TargetGroupTuple{
+						{TargetGroupArn: aws.String(first), Weight: aws.Int32(100)},
+						{TargetGroupArn: aws.String(second), Weight: aws.Int32(0)},
+						{TargetGroupArn: aws.String("invalid")},
+					}}},
+			},
+		}},
+	}}
+	listeners, errs := listenersForLoadBalancerV2(context.Background(), client, aws.String("load-balancer"))
+	require.Len(t, errs, 1)
+	require.Len(t, listeners, 1)
+	targets := listeners[0].DefaultForwardTargetGroups
+	require.Len(t, targets, 2)
+	assert.Equal(t, first, targets[0].Arn)
+	assert.Equal(t, 100, aws.ToInt(targets[0].Weight))
+	assert.Equal(t, second, targets[1].Arn)
+	require.NotNil(t, targets[1].Weight)
+	assert.Zero(t, *targets[1].Weight)
+}
+
+func TestDefaultForwardTargetWithoutWeightedConfiguration(t *testing.T) {
+	groupARN := "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/example/123"
+	targets, errs := defaultForwardTargetGroups([]elbv2types.Action{
+		{Type: elbv2types.ActionTypeEnumRedirect, TargetGroupArn: aws.String(groupARN)},
+		{Type: elbv2types.ActionTypeEnumForward, TargetGroupArn: aws.String(groupARN)},
+		{Type: elbv2types.ActionTypeEnumForward},
+	})
+	require.Len(t, errs, 1)
+	require.Len(t, targets, 1)
+	assert.Equal(t, groupARN, targets[0].Arn)
+	assert.Nil(t, targets[0].Weight)
+}
