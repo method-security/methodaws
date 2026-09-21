@@ -24,6 +24,8 @@ Lookups target referenced IDs and are cached per region for the duration of enum
 Failed lookups are reported as errors; the database is retained and the unresolved resource reference is omitted.
 `dbSubnetGroupSubnetIds` retains the IDs reported by RDS, while `resources.dbSubnetGroupSubnets` contains
 only resolved references. Both describe configured subnet-group membership, not active instance attachments.
+The resource fields use distinct `RdsVpcReference`, `RdsSubnetReference`, and `RdsSecurityGroupReference`
+types so consumers can map each reference directly to its resource type.
 
 #### Usage
 

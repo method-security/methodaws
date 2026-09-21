@@ -17,8 +17,16 @@ type networkAPI interface {
 	DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
 }
 
+type networkReference struct {
+	arn     string
+	id      string
+	region  string
+	ownerID string
+	name    *string
+}
+
 type networkResult struct {
-	reference *rdsfern.RdsNetworkResourceReference
+	reference *networkReference
 	err       error
 }
 
@@ -38,7 +46,7 @@ func (r *networkResolver) enrich(ctx context.Context, instance types.DBInstance,
 		return []string{fmt.Sprintf("cannot resolve network references: %s", err)}
 	}
 	var errors []string
-	resolve := func(kind, id string) *rdsfern.RdsNetworkResourceReference {
+	resolve := func(kind, id string) *networkReference {
 		if id == "" {
 			return nil // Missing IDs are already reported by the instance converter.
 		}
@@ -49,22 +57,30 @@ func (r *networkResolver) enrich(ctx context.Context, instance types.DBInstance,
 		return reference
 	}
 	if instance.DBSubnetGroup != nil {
-		result.Resources.Vpc = resolve("vpc", aws.ToString(instance.DBSubnetGroup.VpcId))
+		if reference := resolve("vpc", aws.ToString(instance.DBSubnetGroup.VpcId)); reference != nil {
+			result.Resources.Vpc = &rdsfern.RdsVpcReference{
+				Arn: reference.arn, Id: reference.id, Region: reference.region, OwnerId: reference.ownerID,
+			}
+		}
 		for _, subnet := range instance.DBSubnetGroup.Subnets {
 			if reference := resolve("subnet", aws.ToString(subnet.SubnetIdentifier)); reference != nil {
-				result.Resources.DbSubnetGroupSubnets = append(result.Resources.DbSubnetGroupSubnets, reference)
+				result.Resources.DbSubnetGroupSubnets = append(result.Resources.DbSubnetGroupSubnets, &rdsfern.RdsSubnetReference{
+					Arn: reference.arn, Id: reference.id, Region: reference.region, OwnerId: reference.ownerID,
+				})
 			}
 		}
 	}
 	for _, group := range instance.VpcSecurityGroups {
 		if reference := resolve("security-group", aws.ToString(group.VpcSecurityGroupId)); reference != nil {
-			result.Resources.SecurityGroups = append(result.Resources.SecurityGroups, reference)
+			result.Resources.SecurityGroups = append(result.Resources.SecurityGroups, &rdsfern.RdsSecurityGroupReference{
+				Arn: reference.arn, Id: reference.id, Region: reference.region, OwnerId: reference.ownerID, Name: reference.name,
+			})
 		}
 	}
 	return errors
 }
 
-func (r *networkResolver) resolve(ctx context.Context, partition, kind, id string) (*rdsfern.RdsNetworkResourceReference, error) {
+func (r *networkResolver) resolve(ctx context.Context, partition, kind, id string) (*networkReference, error) {
 	key := partition + ":" + kind + "/" + id
 	if cached, ok := r.cache[key]; ok {
 		return cached.reference, cached.err
@@ -74,7 +90,7 @@ func (r *networkResolver) resolve(ctx context.Context, partition, kind, id strin
 	return reference, err
 }
 
-func (r *networkResolver) lookup(ctx context.Context, partition, kind, id string) (*rdsfern.RdsNetworkResourceReference, error) {
+func (r *networkResolver) lookup(ctx context.Context, partition, kind, id string) (*networkReference, error) {
 	var owner, reportedARN string
 	var name *string
 	// Each request targets one reported ID; never enumerate unrelated network resources.
@@ -126,7 +142,7 @@ func (r *networkResolver) lookup(ctx context.Context, partition, kind, id string
 	if reportedARN != "" && reportedARN != resourceARN {
 		return nil, fmt.Errorf("reported ARN %q does not match the resource ID, owner, or region", reportedARN)
 	}
-	return &rdsfern.RdsNetworkResourceReference{
-		Arn: resourceARN, Id: id, Region: r.region, OwnerId: owner, Name: name,
+	return &networkReference{
+		arn: resourceARN, id: id, region: r.region, ownerID: owner, name: name,
 	}, nil
 }

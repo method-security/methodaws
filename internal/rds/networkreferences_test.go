@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	rdsfern "github.com/Method-Security/methodaws/generated/go/rds"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -31,7 +32,7 @@ func (s *networkStub) DescribeSubnets(_ context.Context, input *ec2.DescribeSubn
 }
 
 func (s *networkStub) DescribeSecurityGroups(_ context.Context, input *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-	return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: []ec2types.SecurityGroup{{GroupId: &input.GroupIds[0], OwnerId: aws.String("123456789012")}}}, nil
+	return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: []ec2types.SecurityGroup{{GroupId: &input.GroupIds[0], OwnerId: aws.String("123456789012"), GroupName: aws.String("database-access")}}}, nil
 }
 
 func TestNetworkReferencesUseActualOwnersAndKeepValidResults(t *testing.T) {
@@ -53,9 +54,14 @@ func TestNetworkReferencesUseActualOwnersAndKeepValidResults(t *testing.T) {
 		require.Len(t, errs, 1)
 		require.Contains(t, errs[0], "AccessDenied")
 		require.Equal(t, "arn:aws:ec2:us-east-1:210987654321:vpc/vpc-aaaaaaaa", instance.Resources.Vpc.Arn)
+		require.IsType(t, &rdsfern.RdsVpcReference{}, instance.Resources.Vpc)
+		require.Equal(t, "210987654321", instance.Resources.Vpc.OwnerId)
 		require.Len(t, instance.Resources.DbSubnetGroupSubnets, 1)
+		require.IsType(t, &rdsfern.RdsSubnetReference{}, instance.Resources.DbSubnetGroupSubnets[0])
 		require.Equal(t, "arn:aws:ec2:us-east-1:210987654321:subnet/subnet-aaaaaaaa", instance.Resources.DbSubnetGroupSubnets[0].Arn)
+		require.IsType(t, &rdsfern.RdsSecurityGroupReference{}, instance.Resources.SecurityGroups[0])
 		require.Equal(t, "arn:aws:ec2:us-east-1:123456789012:security-group/sg-aaaaaaaa", instance.Resources.SecurityGroups[0].Arn)
+		require.Equal(t, "database-access", aws.ToString(instance.Resources.SecurityGroups[0].Name))
 		require.Len(t, instance.Configuration.DbSubnetGroupSubnetIds, 2)
 	}
 	require.Equal(t, 1, stub.vpcCalls)
