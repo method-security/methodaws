@@ -129,6 +129,7 @@ func getAttachedPoliciesForRole(ctx context.Context, client *iamaws.Client, role
 
 		for _, policy := range result.AttachedPolicies {
 			if aws.ToString(policy.PolicyArn) != "" && aws.ToString(policy.PolicyName) != "" {
+				assignmentID := fmt.Sprintf("%s|%s", aws.ToString(role.Arn), aws.ToString(policy.PolicyArn))
 				policyDoc, err := getPolicyDocument(ctx, client, *policy.PolicyArn)
 				if err != nil {
 					errors = append(errors, fmt.Sprintf("failed to get policy document for %s attached to role %s: %v",
@@ -137,8 +138,9 @@ func getAttachedPoliciesForRole(ctx context.Context, client *iamaws.Client, role
 
 				attachedPolicy := &iam.AttachedPolicy{
 					Identification: &iam.AttachedPolicyIdentificationInfo{
-						Arn:        *policy.PolicyArn,
-						PolicyName: *policy.PolicyName,
+						AssignmentId: assignmentID,
+						Arn:          *policy.PolicyArn,
+						PolicyName:   *policy.PolicyName,
 					},
 					Configuration: &iam.AttachedPolicyConfigurationInfo{
 						PolicyDocument: policyDoc,
