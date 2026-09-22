@@ -104,3 +104,14 @@ types:
       apiId: optional<string>
       region: string
       name: optional<string>
+  ApiGatewayStageReference:
+    properties:
+      arn: string
+      name: string
+      region: string
+      api: ApiGatewayReference
+# WAF Resources
+  WebAclReference:
+    properties:
+      arn: string
+      region: string

@@ -79,14 +79,9 @@ types:
       scope: ScopeType
       description: optional<string>
       defaultAction: optional<ActionType>
-      apiGatewayStageAssociations: optional<list<ApiGatewayStageAssociation>>
-  ApiGatewayStageAssociation:
-    properties:
-      stageArn: string
-      stageName: string
-      api: common.ApiGatewayReference
   WafResourceInfo:
     properties:
+      apiGatewayStages: optional<list<common.ApiGatewayStageReference>>
       loadBalancers: optional<list<common.LoadBalancerReference>>
       cloudFrontDistributions: optional<list<common.CloudFrontDistributionReference>>
       rules: optional<list<RuleInfo>>

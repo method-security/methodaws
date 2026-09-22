@@ -149,7 +149,7 @@ func awsServiceBackendFromIntegrationURI(uri string) (*apigatewayfern.AwsService
 }
 
 // analyzeAPISecurity performs security analysis on API Gateway configurations
-func analyzeAPISecurity(routes []*apigatewayfern.Route, certificates []*apigatewayfern.Certificate, accessLogSettings *apigatewayfern.AccessLogSettings, corsConfig *apigatewayfern.CorsConfiguration) *apigatewayfern.ApiGatewaySecurity {
+func analyzeAPISecurity(routes []*apigatewayfern.Route, certificates []*apigatewayfern.Certificate, corsConfig *apigatewayfern.CorsConfiguration) *apigatewayfern.ApiGatewaySecurity {
 	if routes == nil {
 		return nil
 	}
@@ -168,10 +168,8 @@ func analyzeAPISecurity(routes []*apigatewayfern.Route, certificates []*apigatew
 	if requiredAPIKeys == nil && allKeyRequirementsKnown {
 		requiredAPIKeys = aws.Bool(false)
 	}
-	hasCloudWatchLogging := accessLogSettings != nil
 	hasCorsConfig := corsConfig != nil
 	analysis := &apigatewayfern.ApiGatewaySecurity{
-		HasCloudWatchLogging:  &hasCloudWatchLogging,
 		AuthenticationMethods: []apigatewayfern.AuthorizationType{},
 		TlsVersions:           []apigatewayfern.SecurityPolicy{},
 		CorsConfigured:        &hasCorsConfig,

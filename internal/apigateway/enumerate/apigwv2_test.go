@@ -103,16 +103,11 @@ func TestHTTPAPICallersUsePagesCollectedBeforeFailure(t *testing.T) {
 
 	stages, stageErr := getAllHTTPAPIStages(context.Background(), client, "api-id")
 	require.Error(t, stageErr)
-	assert.Equal(t, []string{"prod"}, httpAPIStageNames(stages))
-
-	settings, settingsErr := getHTTPAPIAccessLogSettings(context.Background(), &stubAPIGatewayV2PaginationClient{
-		stageOutputs: []*apigatewayv2.GetStagesOutput{
-			{Items: stages, NextToken: aws.String("next")}, nil,
-		},
-		stageErrors: []error{nil, errors.New("stage page denied")},
-	}, "api-id")
-	require.Error(t, settingsErr)
-	require.NotNil(t, settings)
+	resources, conversionErrors := httpAPIStages("arn:aws:apigateway:us-east-1::/apis/api-id", stages)
+	require.Empty(t, conversionErrors)
+	require.Len(t, resources, 1)
+	assert.Equal(t, "prod", resources[0].Identification.Name)
+	require.NotNil(t, resources[0].Configuration.AccessLogSettings)
 
 	certificates, certificateErrors := getHTTPAPICertificates(context.Background(), client, "api-id")
 	require.Len(t, certificateErrors, 1)
@@ -120,7 +115,7 @@ func TestHTTPAPICallersUsePagesCollectedBeforeFailure(t *testing.T) {
 	assert.Equal(t, "arn:aws:acm:us-east-1:123456789012:certificate/example", certificates[0].Arn)
 }
 
-func TestHTTPAPIStageNamesIncludeDefaultAndAreStable(t *testing.T) {
+func TestHTTPAPIStagesIncludeDefaultAndAreStable(t *testing.T) {
 	t.Parallel()
 
 	stages := []types.Stage{
@@ -130,7 +125,11 @@ func TestHTTPAPIStageNamesIncludeDefaultAndAreStable(t *testing.T) {
 		{},
 	}
 
-	assert.Equal(t, []string{"$default", "prod"}, httpAPIStageNames(stages))
+	resources, errs := httpAPIStages("arn:aws:apigateway:us-east-1::/apis/api-id", stages)
+	require.Len(t, errs, 1)
+	require.Len(t, resources, 2)
+	assert.Equal(t, "$default", resources[0].Identification.Name)
+	assert.Equal(t, "prod", resources[1].Identification.Name)
 }
 
 func TestHTTPAPIPaginationHelpersCollectEveryPage(t *testing.T) {

@@ -114,14 +114,8 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 	if err != nil {
 		return nil, []string{fmt.Sprintf("Failed to build REST API ARN for API %s: %s", *api.Id, err)}
 	}
-	var stageNames []string
-	for _, stage := range stages {
-		if aws.ToString(stage.StageName) == "" {
-			errors = append(errors, "REST API stage name is missing")
-			continue
-		}
-		stageNames = append(stageNames, *stage.StageName)
-	}
+	stageResources, stageErrors := restAPIStages(apiARN, stages)
+	errors = append(errors, stageErrors...)
 
 	// Get resources and methods with security info
 	routes, routesComplete, routeErrors := getRestAPIRoutes(ctx, client, *api.Id, region)
@@ -142,20 +136,14 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 		errors = append(errors, fmt.Sprintf("Certificate retrieval failed for API %s: %s", *api.Id, err))
 	}
 
-	// The API-level scalar fields can describe a stage only when there is exactly one.
-	var baseURL, clientCertificateID *string
-	var accessLogSettings *apigatewayfern.AccessLogSettings
-	if len(stages) == 1 && len(stageNames) == 1 {
+	// A single stage supplies an unambiguous API-level invocation URL.
+	var baseURL *string
+	if len(stages) == 1 && len(stageResources) == 1 {
 		suffix, suffixErr := utils.AWSDNSSuffixForRegion(region)
 		if suffixErr != nil {
 			errors = append(errors, suffixErr.Error())
 		} else {
-			baseURL = aws.String(fmt.Sprintf("https://%s.execute-api.%s.%s/%s", *api.Id, region, suffix, stageNames[0]))
-		}
-		clientCertificateID = stages[0].ClientCertificateId
-		accessLogSettings, err = getAccessLogSettings(stages[0])
-		if err != nil {
-			errors = append(errors, err.Error())
+			baseURL = aws.String(fmt.Sprintf("https://%s.execute-api.%s.%s/%s", *api.Id, region, suffix, stageResources[0].Identification.Name))
 		}
 	}
 
@@ -163,12 +151,9 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 	// Resources are now nested within routes, no need for separate discovery
 
 	// Perform security analysis
-	securityAnalysis := analyzeAPISecurity(routes, certificates, accessLogSettings, nil)
+	securityAnalysis := analyzeAPISecurity(routes, certificates, nil)
 	if securityAnalysis != nil && !routesComplete && !aws.ToBool(securityAnalysis.ApiKeysRequired) {
 		securityAnalysis.ApiKeysRequired = nil
-	}
-	if securityAnalysis != nil && (len(stages) != 1 || len(stageNames) != 1) {
-		securityAnalysis.HasCloudWatchLogging = nil
 	}
 
 	// Create identification info
@@ -182,17 +167,15 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 
 	// Create configuration info
 	configuration := &apigatewayfern.ApiGatewayConfigurationInfo{
-		Version:             apigatewayfern.ApiGatewayVersionV1,
-		Description:         api.Description,
-		Stages:              stageNames,
-		AccessLogSettings:   accessLogSettings,
-		ClientCertificateId: clientCertificateID,
-		Certificates:        certificates,
-		Security:            securityAnalysis,
+		Version:      apigatewayfern.ApiGatewayVersionV1,
+		Description:  api.Description,
+		Certificates: certificates,
+		Security:     securityAnalysis,
 	}
 
 	// Create resource info
 	resources := &apigatewayfern.ApiGatewayResourceInfo{
+		Stages: stageResources,
 		Routes: routes,
 	}
 
@@ -326,6 +309,7 @@ func getRestAPIRoutes(ctx context.Context, client *apigateway.Client, apiID, reg
 				Configuration: &apigatewayfern.RouteConfigurationInfo{
 					Authorization:  authType,
 					ApiKeyRequired: method.ApiKeyRequired,
+					IsDefaultRoute: aws.Bool(false),
 				},
 			}
 			route.Resources = resources
@@ -568,18 +552,4 @@ func getAPICertificates(ctx context.Context, client *apigateway.Client, apiID st
 	}
 
 	return certificates, errors
-}
-
-// getAccessLogSettings converts stage access log settings
-func getAccessLogSettings(stage types.Stage) (*apigatewayfern.AccessLogSettings, error) {
-	if stage.AccessLogSettings == nil || stage.AccessLogSettings.DestinationArn == nil {
-		return nil, nil
-	}
-
-	settings := &apigatewayfern.AccessLogSettings{
-		DestinationArn: *stage.AccessLogSettings.DestinationArn,
-		Format:         stage.AccessLogSettings.Format,
-	}
-
-	return settings, nil
 }
