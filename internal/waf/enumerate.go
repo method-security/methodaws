@@ -172,13 +172,12 @@ func enumerateWAFForScope(
 		resourceInfo := &waffern.WafResourceInfo{
 			Rules: rules,
 		}
-		var stageAssociations []*waffern.ApiGatewayStageAssociation
 
 		if awsScope == types.ScopeRegional {
 			resourceArns, resourceErrors := resourcesForWebACL(ctx, wafClient, webACL.ARN, region)
 			errors = append(errors, resourceErrors...)
 			var referenceErrors []string
-			resourceInfo.LoadBalancers, stageAssociations, referenceErrors = referencesFromResourceARNs(resourceArns, webACLARN)
+			resourceInfo.LoadBalancers, resourceInfo.ApiGatewayStages, referenceErrors = referencesFromResourceARNs(resourceArns, webACLARN)
 			for _, err := range referenceErrors {
 				errors = append(errors, fmt.Sprintf("WebACL %s: %s", webACLARN.String(), err))
 			}
@@ -191,10 +190,9 @@ func enumerateWAFForScope(
 				Region: region,
 			},
 			Configuration: &waffern.WafConfigurationInfo{
-				Scope:                       fernScope,
-				Description:                 webACL.Description,
-				DefaultAction:               defaultAction,
-				ApiGatewayStageAssociations: stageAssociations,
+				Scope:         fernScope,
+				Description:   webACL.Description,
+				DefaultAction: defaultAction,
 			},
 			Resources: resourceInfo,
 		}
@@ -421,9 +419,9 @@ func resourcesForWebACL(ctx context.Context, wafClient wafAPI, webACLArn *string
 func referencesFromResourceARNs(
 	resourceARNs []string,
 	webACLARN arn.ARN,
-) ([]*common.LoadBalancerReference, []*waffern.ApiGatewayStageAssociation, []string) {
+) ([]*common.LoadBalancerReference, []*common.ApiGatewayStageReference, []string) {
 	var loadBalancers []*common.LoadBalancerReference
-	var stages []*waffern.ApiGatewayStageAssociation
+	var stages []*common.ApiGatewayStageReference
 	var errors []string
 	for _, resourceARN := range resourceARNs {
 		parsed, err := arn.Parse(resourceARN)
@@ -445,10 +443,11 @@ func referencesFromResourceARNs(
 			parts[0] == "" && parts[1] == "restapis" && hasValue(&parts[2]) && parts[3] == "stages" && hasValue(&parts[4]) {
 			apiID := parts[2]
 			parsed.Resource = "/restapis/" + apiID
-			stages = append(stages, &waffern.ApiGatewayStageAssociation{
-				StageArn:  resourceARN,
-				StageName: parts[4],
-				Api:       &common.ApiGatewayReference{Arn: parsed.String(), ApiId: &apiID, Region: parsed.Region},
+			stages = append(stages, &common.ApiGatewayStageReference{
+				Arn:    resourceARN,
+				Name:   parts[4],
+				Region: parsed.Region,
+				Api:    &common.ApiGatewayReference{Arn: parsed.String(), ApiId: &apiID, Region: parsed.Region},
 			})
 			continue
 		}

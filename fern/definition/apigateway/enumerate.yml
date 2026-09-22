@@ -60,7 +60,6 @@ types:
   ApiGatewaySecurity:
     properties:
       hasWafIntegration: optional<boolean>
-      hasCloudWatchLogging: optional<boolean>
       hasThrottling: optional<boolean>
       openEndpoints: optional<integer>
       authenticationMethods: optional<list<AuthorizationType>>
@@ -143,6 +142,7 @@ types:
     properties:
       authorization: optional<AuthorizationType>
       apiKeyRequired: optional<boolean>
+      isDefaultRoute: optional<boolean>
       throttle: optional<Throttle>
   RouteResourceInfo:
     properties:
@@ -154,6 +154,28 @@ types:
       identification: RouteIdentificationInfo
       configuration: RouteConfigurationInfo
       resources: optional<RouteResourceInfo>
+# Stage Structure
+  StageIdentificationInfo:
+    properties:
+      arn: string
+      name: string
+      region: string
+  StageConfigurationInfo:
+    properties:
+      description: optional<string>
+      deploymentId: optional<string>
+      variables: optional<map<string, string>>
+      autoDeploy: optional<boolean>
+      accessLogSettings: optional<AccessLogSettings>
+      clientCertificateId: optional<string>
+  StageResourceInfo:
+    properties:
+      webAcl: optional<common.WebAclReference>
+  Stage:
+    properties:
+      identification: StageIdentificationInfo
+      configuration: StageConfigurationInfo
+      resources: optional<StageResourceInfo>
 # API Gateway Structure
   ApiGatewayIdentificationInfo:
     properties:
@@ -166,14 +188,13 @@ types:
     properties:
       version: ApiGatewayVersion
       description: optional<string>
-      stages: optional<list<string>>
-      accessLogSettings: optional<AccessLogSettings>
       corsConfiguration: optional<CorsConfiguration>
-      clientCertificateId: optional<string>
       certificates: optional<list<Certificate>>
       security: optional<ApiGatewaySecurity>
   ApiGatewayResourceInfo:
     properties:
+      stages: optional<list<Stage>>
+      # Current API configuration, not a stage's deployed snapshot.
       routes: optional<list<Route>>
   ApiGatewayInstance:
     properties:

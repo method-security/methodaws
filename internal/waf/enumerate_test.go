@@ -124,12 +124,13 @@ func TestEnumerateWAFForScopePaginatesAndListsAssociationsOnce(t *testing.T) {
 		wafs[0].Resources.LoadBalancers[0].Arn)
 	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/second/def",
 		wafs[0].Resources.LoadBalancers[1].Arn)
-	require.Len(t, wafs[0].Configuration.ApiGatewayStageAssociations, 2)
-	assert.Equal(t, "first-api", *wafs[0].Configuration.ApiGatewayStageAssociations[0].Api.ApiId)
-	assert.Equal(t, "second-api", *wafs[0].Configuration.ApiGatewayStageAssociations[1].Api.ApiId)
-	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api", wafs[0].Configuration.ApiGatewayStageAssociations[0].Api.Arn)
-	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api/stages/prod", wafs[0].Configuration.ApiGatewayStageAssociations[0].StageArn)
-	assert.Equal(t, "prod", wafs[0].Configuration.ApiGatewayStageAssociations[0].StageName)
+	require.Len(t, wafs[0].Resources.ApiGatewayStages, 2)
+	assert.Equal(t, "first-api", *wafs[0].Resources.ApiGatewayStages[0].Api.ApiId)
+	assert.Equal(t, "second-api", *wafs[0].Resources.ApiGatewayStages[1].Api.ApiId)
+	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api", wafs[0].Resources.ApiGatewayStages[0].Api.Arn)
+	assert.Equal(t, "arn:aws:apigateway:us-east-1::/restapis/first-api/stages/prod", wafs[0].Resources.ApiGatewayStages[0].Arn)
+	assert.Equal(t, "prod", wafs[0].Resources.ApiGatewayStages[0].Name)
+	assert.Equal(t, "us-east-1", wafs[0].Resources.ApiGatewayStages[0].Region)
 }
 
 func TestEnumerateCloudFrontWAFDoesNotListRegionalAssociations(t *testing.T) {
