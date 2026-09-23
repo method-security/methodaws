@@ -12,6 +12,7 @@ types:
 # Attached Policy Supporting Structs
   AttachedPolicyIdentificationInfo:
     properties:
+      assignmentId: string
       arn: string
       policyName: string
   AttachedPolicyConfigurationInfo:
