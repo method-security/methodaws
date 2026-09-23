@@ -160,6 +160,7 @@ types:
       arn: string
       name: string
       region: string
+      url: optional<string>
   StageConfigurationInfo:
     properties:
       description: optional<string>
@@ -171,6 +172,8 @@ types:
   StageResourceInfo:
     properties:
       webAcl: optional<common.WebAclReference>
+      # Routes and integrations exported from this stage's deployed configuration.
+      routes: optional<list<Route>>
   Stage:
     properties:
       identification: StageIdentificationInfo

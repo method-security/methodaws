@@ -116,6 +116,7 @@ func convertV1RestAPIToFern(ctx context.Context, client *apigateway.Client, api 
 	}
 	stageResources, stageErrors := restAPIStages(apiARN, stages)
 	errors = append(errors, stageErrors...)
+	errors = append(errors, collectRESTStageRoutes(ctx, client, *api.Id, region, stageResources)...)
 
 	// Get resources and methods with security info
 	routes, routesComplete, routeErrors := getRestAPIRoutes(ctx, client, *api.Id, region)

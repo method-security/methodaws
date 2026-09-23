@@ -158,6 +158,7 @@ func convertV2HttpAPIToFern(ctx context.Context, client *apigatewayv2.Client, ap
 	}
 	stageResources, stageErrors := httpAPIStages(apiARN, stages)
 	errors = append(errors, stageErrors...)
+	errors = append(errors, collectHTTPStageRoutes(ctx, client, *api.ApiId, region, stageResources)...)
 	// Perform security analysis
 	securityAnalysis := analyzeAPISecurity(routes, certificates, corsConfig)
 

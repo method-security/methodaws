@@ -51,3 +51,14 @@ By default, both v1 (REST API) and v2 (HTTP API) versions are enumerated to prov
 ## Output
 
 The output includes detailed information about your API Gateway resources in the specified output format (signal, json).
+
+`resources.routes` contains the API's current route configuration. Each stage under
+`resources.stages` has its own `resources.routes`, collected with a stage-specific
+OpenAPI export including integration and authorization extensions. Stage routes keep
+their deployed backends and execution roles, which can differ from the current API
+configuration. Reported stage variables are used to resolve integration references.
+An unambiguous server URL from the export is returned as the stage's `identification.url`.
+
+Stage exports require API Gateway read permission on the REST stage export resource
+or the HTTP API export resource. An export failure is reported without copying current
+API routes into the affected stage. Other stages and APIs continue to be enumerated.
