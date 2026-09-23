@@ -1332,6 +1332,15 @@ methodaws<span class="w"> </span>api-gateway<span class="w"> </span>enumerate
 <p>By default, both v1 (REST API) and v2 (HTTP API) versions are enumerated to provide comprehensive coverage of your API Gateway infrastructure.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">#</a></h2>
 <p>The output includes detailed information about your API Gateway resources in the specified output format (signal, json).</p>
+<p><code>resources.routes</code> contains the API's current route configuration. Each stage under
+<code>resources.stages</code> has its own <code>resources.routes</code>, collected with a stage-specific
+OpenAPI export including integration and authorization extensions. Stage routes keep
+their deployed backends and execution roles, which can differ from the current API
+configuration. Reported stage variables are used to resolve integration references.
+An unambiguous server URL from the export is returned as the stage's <code>identification.url</code>.</p>
+<p>Stage exports require API Gateway read permission on the REST stage export resource
+or the HTTP API export resource. An export failure is reported without copying current
+API routes into the affected stage. Other stages and APIs continue to be enumerated.</p>
 
 
 

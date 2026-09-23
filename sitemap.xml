@@ -2,112 +2,112 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://method-security.github.io/methodaws/index.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/community/community.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/development/adding.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/development/principles.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/development/setup.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/index.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/apigateway.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/cloudfront.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/ec2.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/eks.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/iam.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/lambda.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/loadbalancer.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/rds.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/route53.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/s3.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/securitygroup.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/sts.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/vpc.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/docs/waf.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/getting-started/basic-usage.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://method-security.github.io/methodaws/getting-started/installation.html</loc>
-         <lastmod>2026-09-21</lastmod>
+         <lastmod>2026-09-23</lastmod>
          <changefreq>daily</changefreq>
     </url>
 </urlset>
