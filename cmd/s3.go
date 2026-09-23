@@ -24,7 +24,7 @@ func (a *MethodAws) InitS3Command() {
 	// Subcommands:
 	// - enumerate: Enumerate all S3 buckets in your AWS account.
 	// - list: List all objects in a single S3 bucket.
-	// - external: Enumerate a single public facing S3 bucket from an external prespective.
+	// - external: Enumerate public-facing S3 buckets from an external perspective.
 	s3Cmd := &cobra.Command{
 		Use:   "s3",
 		Short: "Audit and manage S3 services.",
@@ -57,8 +57,8 @@ func (a *MethodAws) InitS3Command() {
 	// External Command
 	externalCmd := &cobra.Command{
 		Use:   "external",
-		Short: "Enumerate a single public facing S3 bucket from an external prespective.",
-		Long:  `Enumerate a single public facing S3 bucket from an external prespective.`,
+		Short: "Enumerate public-facing S3 buckets from an external perspective.",
+		Long:  `Enumerate public-facing S3 buckets from an external perspective.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Override parent's PersistentPreRunE to use authed=false since external command uses anonymous credentials
 			outputFormat, _ := cmd.Root().PersistentFlags().GetString("output")

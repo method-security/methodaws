@@ -49,7 +49,7 @@ The Lambda enumerate command gathers information about:
 
 ## Output
 
-The output includes detailed information about your Lambda functions and their configurations in the specified output format (signal, json).
+The output includes detailed information about your Lambda functions and their configurations in the specified output format (signal, JSON, or YAML).
 
 ## Security Considerations
 

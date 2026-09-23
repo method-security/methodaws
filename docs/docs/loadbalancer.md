@@ -69,7 +69,7 @@ these settings are not copied onto all registered instances.
 
 ## Output
 
-The output includes detailed information about your load balancers and their configurations in the specified output format (signal, json).
+The output includes detailed information about your load balancers and their configurations in the specified output format (signal, JSON, or YAML).
 
 ## Security Considerations
 

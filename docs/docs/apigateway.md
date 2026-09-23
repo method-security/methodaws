@@ -50,7 +50,7 @@ By default, both v1 (REST API) and v2 (HTTP API) versions are enumerated to prov
 
 ## Output
 
-The output includes detailed information about your API Gateway resources in the specified output format (signal, json).
+The output includes detailed information about your API Gateway resources in the specified output format (signal, JSON, or YAML).
 
 `resources.routes` contains the API's current route configuration. Each stage under
 `resources.stages` has its own `resources.routes`, collected with a stage-specific
