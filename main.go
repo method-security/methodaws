@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"os"
 
 	"github.com/Method-Security/methodaws/cmd"
@@ -10,8 +9,6 @@ import (
 var Version = "none"
 
 func main() {
-	flag.Parse()
-
 	methodaws := cmd.NewMethodAws(Version)
 	methodaws.InitRootCommand()
 
