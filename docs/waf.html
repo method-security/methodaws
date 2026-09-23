@@ -1332,7 +1332,7 @@ methodaws<span class="w"> </span>waf<span class="w"> </span>enumerate<span class
 <p><code>resources</code> contains rule objects and load balancer/distribution references. Stage-scoped associations are retained under <code>configuration.apiGatewayStageAssociations</code>; they do not imply that every stage of an API is protected. CloudFront distributions are global resources and their references omit <code>region</code>.</p>
 <p>CloudFront associations use <code>cloudfront:ListDistributionsByWebACLId</code>. If this lookup fails, the Web ACL and previously collected associations are retained with an error. Referenced rule groups, IP sets, and regex sets are not expanded into separate inventories.</p>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">#</a></h2>
-<p>The output includes detailed information about your WAF resources and their configurations in the specified output format (signal, json).</p>
+<p>The output includes detailed information about your WAF resources and their configurations in the specified output format (signal, JSON, or YAML).</p>
 <h2 id="security-considerations">Security Considerations<a class="headerlink" href="#security-considerations" title="Permanent link">#</a></h2>
 <p>When enumerating WAF resources, methodaws will collect:
 - Web ACL configurations and rules
