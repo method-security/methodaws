@@ -49,7 +49,7 @@ CloudFront associations use `cloudfront:ListDistributionsByWebACLId`. If this lo
 
 ## Output
 
-The output includes detailed information about your WAF resources and their configurations in the specified output format (signal, json).
+The output includes detailed information about your WAF resources and their configurations in the specified output format (signal, JSON, or YAML).
 
 ## Security Considerations
 

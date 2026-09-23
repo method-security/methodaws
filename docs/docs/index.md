@@ -24,10 +24,12 @@ methodaws has several top level flags that can be used on any subcommand. These 
 ```bash
 Flags:
   -h, --help                   help for methodaws
-  -o, --output string          Output format (signal, json). Default value is signal (default "signal")
+      --http-proxy string      HTTP/HTTPS proxy URL (e.g., http://proxy.example.com:8080)
+  -o, --output string          Output format (signal, json, yaml). Default value is signal (default "signal")
   -f, --output-file string     Path to output file. If blank, will output to STDOUT
   -q, --quiet                  Suppress output
   -r, --regions stringArray    AWS Regions to search for resources. You can specify multiple regions by providing the flag multiple times. If blank, will search all regions.
+      --socks-proxy string     SOCKS proxy URL (e.g., socks5://proxy.example.com:1080)
   -v, --verbose                Verbose output
 ```
 

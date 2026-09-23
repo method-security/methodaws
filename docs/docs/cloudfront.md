@@ -43,7 +43,7 @@ The CloudFront enumerate command gathers information about:
 
 ## Output
 
-The output includes detailed information about your CloudFront distributions and their configurations in the specified output format (signal, json).
+The output includes detailed information about your CloudFront distributions and their configurations in the specified output format (signal, JSON, or YAML).
 
 ## Note
 
