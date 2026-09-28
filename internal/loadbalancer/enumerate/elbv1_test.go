@@ -18,14 +18,15 @@ func TestClassicTargetPortsAreNotInferredFromListeners(t *testing.T) {
 		},
 	}
 
-	targets, errs := targetsForLoadBalancerV1(loadBalancer)
+	targets, errs := targetsForLoadBalancerV1(loadBalancer, "us-east-1", "123456789012")
 
 	require.Empty(t, errs)
 	require.Len(t, targets, 1)
 	assert.Nil(t, targets[0].Port)
+	assert.Equal(t, "arn:aws:ec2:us-east-1:123456789012:instance/instance-id", aws.ToString(targets[0].Arn))
 
 	loadBalancer.ListenerDescriptions = loadBalancer.ListenerDescriptions[:1]
-	targets, errs = targetsForLoadBalancerV1(loadBalancer)
+	targets, errs = targetsForLoadBalancerV1(loadBalancer, "us-east-1", "123456789012")
 	require.Empty(t, errs)
 	require.Len(t, targets, 1)
 	assert.Nil(t, targets[0].Port)

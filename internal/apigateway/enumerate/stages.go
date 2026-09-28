@@ -71,8 +71,12 @@ func restAPIStages(apiARN string, stages []v1types.Stage) ([]*apigatewayfern.Sta
 				strings.TrimSpace(webACL.AccountID) == "" {
 				errors = append(errors, fmt.Sprintf("Stage %s: invalid Web ACL ARN %q", identification.Arn, *stage.WebAclArn))
 			} else {
+				webACLName := parts[2]
+				if webACL.Service == "waf-regional" {
+					webACLName = parts[1]
+				}
 				converted.Resources = &apigatewayfern.StageResourceInfo{
-					WebAcl: &common.WebAclReference{Arn: *stage.WebAclArn, Region: webACL.Region},
+					WebAcl: &common.WebAclReference{Arn: *stage.WebAclArn, Name: &webACLName, Region: webACL.Region},
 				}
 			}
 		}

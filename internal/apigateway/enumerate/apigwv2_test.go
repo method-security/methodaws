@@ -194,6 +194,8 @@ func TestConvertV2VpcLinkDerivesLoadBalancerFromListener(t *testing.T) {
 		"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/example/abc",
 		aws.ToString(backend.LoadBalancer.LoadBalancerArn),
 	)
+	require.NotNil(t, backend.LoadBalancer.LoadBalancerType)
+	assert.Equal(t, "APPLICATION", string(*backend.LoadBalancer.LoadBalancerType))
 	assert.Nil(t, backend.LoadBalancer.DnsName)
 }
 

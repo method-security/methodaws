@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
+	"github.com/Method-Security/methodaws/generated/go/common"
 	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
@@ -413,6 +414,10 @@ func createV2VpcLinkBackend(integration *apigatewayv2.GetIntegrationOutput) (*ap
 		loadBalancerARN.Resource = strings.Join(append([]string{"loadbalancer"}, parts[1:4]...), "/")
 		listenerARN := parsed.String()
 		loadBalancerARNString := loadBalancerARN.String()
+		loadBalancerType := common.LoadBalancerTypeApplication
+		if parts[1] == "net" {
+			loadBalancerType = common.LoadBalancerTypeNetwork
+		}
 		return &apigatewayfern.VpcLinkBackend{
 			Type: "load_balancer",
 			LoadBalancer: &apigatewayfern.LoadBalancerBackend{
@@ -420,6 +425,7 @@ func createV2VpcLinkBackend(integration *apigatewayv2.GetIntegrationOutput) (*ap
 				VpcLinkId:        connectionID,
 				LoadBalancerArn:  &loadBalancerARNString,
 				LoadBalancerArns: []string{loadBalancerARNString},
+				LoadBalancerType: &loadBalancerType,
 				ListenerArn:      &listenerARN,
 			},
 		}, nil

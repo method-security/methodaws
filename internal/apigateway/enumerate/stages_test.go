@@ -53,6 +53,7 @@ func TestRESTStageSettingsKeepTheirOwner(t *testing.T) {
 	assert.Equal(t, "arn:aws:logs:us-east-1:123456789012:log-group:dev", stages[0].Configuration.AccessLogSettings.DestinationArn)
 	assert.Equal(t, apiARN+"/stages/prod", stages[1].Identification.Arn)
 	assert.Equal(t, webACL, stages[1].Resources.WebAcl.Arn)
+	assert.Equal(t, "prod", aws.ToString(stages[1].Resources.WebAcl.Name))
 	assert.Equal(t, "deployment-prod", *stages[1].Configuration.DeploymentId)
 	assert.Equal(t, "cert-prod", *stages[1].Configuration.ClientCertificateId)
 	assert.Equal(t, "prod", stages[1].Configuration.Variables["backend"])

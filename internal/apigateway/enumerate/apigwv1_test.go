@@ -47,6 +47,8 @@ func TestConvertV1VpcLinkResolvesLoadBalancerTargets(t *testing.T) {
 	backend := converted.VpcLink.Backend.LoadBalancer
 	assert.Equal(t, "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/example/abc", aws.ToString(backend.LoadBalancerArn))
 	assert.Equal(t, []string{aws.ToString(backend.LoadBalancerArn)}, backend.LoadBalancerArns)
+	require.NotNil(t, backend.LoadBalancerType)
+	assert.Equal(t, "NETWORK", string(*backend.LoadBalancerType))
 	assert.Nil(t, backend.DnsName)
 
 	_, err = convertV1Integration(context.Background(), client, cache, integration, "us-east-1")

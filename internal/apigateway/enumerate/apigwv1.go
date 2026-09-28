@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	apigatewayfern "github.com/Method-Security/methodaws/generated/go/apigateway"
+	"github.com/Method-Security/methodaws/generated/go/common"
 	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsarn "github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/apigateway"
 	"github.com/aws/aws-sdk-go-v2/service/apigateway/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -456,7 +458,29 @@ func createV1LoadBalancerBackend(
 
 	backend.LoadBalancerArn = &targetARNs[0]
 	backend.LoadBalancerArns = targetARNs
+	backend.LoadBalancerType = loadBalancerTypeFromARN(targetARNs[0])
 	return backend, nil
+}
+
+func loadBalancerTypeFromARN(value string) *common.LoadBalancerType {
+	parsed, err := awsarn.Parse(value)
+	if err != nil || parsed.Service != "elasticloadbalancing" {
+		return nil
+	}
+	parts := strings.Split(parsed.Resource, "/")
+	if len(parts) < 2 || parts[0] != "loadbalancer" {
+		return nil
+	}
+	switch parts[1] {
+	case "app":
+		loadBalancerType := common.LoadBalancerTypeApplication
+		return &loadBalancerType
+	case "net":
+		loadBalancerType := common.LoadBalancerTypeNetwork
+		return &loadBalancerType
+	default:
+		return nil
+	}
 }
 
 // getEndpointConfiguration converts AWS endpoint configuration to Fern EndpointType

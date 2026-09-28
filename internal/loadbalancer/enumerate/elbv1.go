@@ -86,7 +86,7 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 			}
 
 			// Get targets and listeners
-			targets, errors := targetsForLoadBalancerV1(lb)
+			targets, errors := targetsForLoadBalancerV1(lb, region, accountID)
 			for _, err := range errors {
 				errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s in region %s: %s", identification.Arn, region, err))
 			}
@@ -158,7 +158,7 @@ func classicLoadBalancerIdentification(
 	return identification, nil
 }
 
-func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*loadbalancerfern.Target, []string) {
+func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription, region, accountID string) ([]*loadbalancerfern.Target, []string) {
 	targets := []*loadbalancerfern.Target{}
 	errorMessages := []string{}
 
@@ -168,8 +168,14 @@ func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*lo
 			continue
 		}
 		targetType := loadbalancerfern.TargetTypeInstance
+		targetARN, err := methodawsutils.BuildRegionalARN(region, "ec2", accountID, "instance/"+*instance.InstanceId)
+		if err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s target %s: %s", aws.ToString(loadBalancer.LoadBalancerName), *instance.InstanceId, err))
+			continue
+		}
 		target := &loadbalancerfern.Target{
 			Id:   *instance.InstanceId,
+			Arn:  &targetARN,
 			Type: targetType,
 		}
 		targets = append(targets, target)

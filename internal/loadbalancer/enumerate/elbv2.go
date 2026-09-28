@@ -8,6 +8,7 @@ import (
 
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	loadbalancerfern "github.com/Method-Security/methodaws/generated/go/loadbalancer"
+	methodawsutils "github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
@@ -431,6 +432,12 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 			Type:             targetType,
 			AvailabilityZone: availabilityZone,
 		}
+		targetARN, err := targetResourceARN(targetGroup, target)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		target.Arn = targetARN
 		if targetHealth.Target.Port != nil {
 			portValue := int(*targetHealth.Target.Port)
 			target.Port = &portValue
@@ -438,6 +445,33 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 		targets = append(targets, target)
 	}
 	return targets, errors.Join(errs...)
+}
+
+func targetResourceARN(targetGroup types.TargetGroup, target *loadbalancerfern.Target) (*string, error) {
+	if target == nil || target.Id == "" {
+		return nil, nil
+	}
+	switch target.Type {
+	case loadbalancerfern.TargetTypeIp:
+		return nil, nil
+	case loadbalancerfern.TargetTypeLambda, loadbalancerfern.TargetTypeAlb:
+		if strings.HasPrefix(target.Id, "arn:") {
+			return &target.Id, nil
+		}
+		return nil, fmt.Errorf("target group %s target %s is missing an ARN", aws.ToString(targetGroup.TargetGroupArn), target.Id)
+	case loadbalancerfern.TargetTypeInstance:
+		parsed, err := arn.Parse(aws.ToString(targetGroup.TargetGroupArn))
+		if err != nil || parsed.AccountID == "" || parsed.Region == "" {
+			return nil, fmt.Errorf("target group %s cannot identify instance target %s", aws.ToString(targetGroup.TargetGroupArn), target.Id)
+		}
+		targetARN, err := methodawsutils.BuildRegionalARN(parsed.Region, "ec2", parsed.AccountID, "instance/"+target.Id)
+		if err != nil {
+			return nil, fmt.Errorf("target group %s cannot identify instance target %s: %w", aws.ToString(targetGroup.TargetGroupArn), target.Id, err)
+		}
+		return &targetARN, nil
+	default:
+		return nil, nil
+	}
 }
 
 func certificatesForListenerV2(ctx context.Context, client elbv2ResourceAPI, listenerARN *string) ([]*loadbalancerfern.Certificate, []string) {

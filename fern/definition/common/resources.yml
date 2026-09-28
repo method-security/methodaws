@@ -114,4 +114,5 @@ types:
   WebAclReference:
     properties:
       arn: string
+      name: optional<string>
       region: string
