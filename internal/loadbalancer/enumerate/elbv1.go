@@ -175,14 +175,14 @@ func targetsForLoadBalancerV1(loadBalancer types.LoadBalancerDescription, region
 		}
 		targetType := loadbalancerfern.TargetTypeInstance
 		targetARN, err := methodawsutils.BuildRegionalARN(region, "ec2", accountID, "instance/"+*instance.InstanceId)
-		if err != nil {
-			errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s target %s: %s", aws.ToString(loadBalancer.LoadBalancerName), *instance.InstanceId, err))
-			continue
-		}
 		target := &loadbalancerfern.Target{
 			Id:   *instance.InstanceId,
-			Arn:  &targetARN,
 			Type: targetType,
+		}
+		if err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s target %s: %s", aws.ToString(loadBalancer.LoadBalancerName), *instance.InstanceId, err))
+		} else {
+			target.Arn = &targetARN
 		}
 		targets = append(targets, target)
 	}

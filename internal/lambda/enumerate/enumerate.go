@@ -81,11 +81,13 @@ func parseLambdaFunctionConfiguration(
 	var vpcReference *common.VpcReference
 	var securityGroups []*common.SecurityGroupReference
 	if function.VpcConfig != nil {
-		vpcReference, errs := networkResolver.Vpc(ctx, aws.ToString(function.VpcConfig.VpcId), function.VpcConfig.SubnetIds)
+		var errs []error
+		vpcReference, errs = networkResolver.Vpc(ctx, aws.ToString(function.VpcConfig.VpcId), function.VpcConfig.SubnetIds)
 		parseErrors = append(parseErrors, errs...)
 		securityGroups, errs = networkResolver.SecurityGroups(ctx, function.VpcConfig.SecurityGroupIds)
 		parseErrors = append(parseErrors, errs...)
-		if vpcReference == nil && (len(function.VpcConfig.SubnetIds) > 0 || len(function.VpcConfig.SecurityGroupIds) > 0) {
+		if aws.ToString(function.VpcConfig.VpcId) == "" &&
+			(len(function.VpcConfig.SubnetIds) > 0 || len(function.VpcConfig.SecurityGroupIds) > 0) {
 			parseErrors = append(parseErrors, errors.New("VPC configuration has subnet or security group entries but no VPC ID"))
 		}
 	}

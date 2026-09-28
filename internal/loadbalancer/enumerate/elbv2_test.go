@@ -160,6 +160,26 @@ func TestTargetPortRemainsUnsetWhenAWSOmitsIt(t *testing.T) {
 	assert.Equal(t, "arn:aws:ec2:us-east-1:123456789012:instance/instance-id", aws.ToString(targets[0].Arn))
 }
 
+func TestTargetIsRetainedWhenARNConstructionFails(t *testing.T) {
+	t.Parallel()
+
+	client := &stubELBV2ResourceClient{targetHealth: &elasticloadbalancingv2.DescribeTargetHealthOutput{
+		TargetHealthDescriptions: []elbv2types.TargetHealthDescription{{
+			Target: &elbv2types.TargetDescription{Id: aws.String("instance-id")},
+		}},
+	}}
+
+	targets, err := targetsForTargetGroupV2(context.Background(), client, elbv2types.TargetGroup{
+		TargetGroupArn: aws.String("not-an-arn"),
+		TargetType:     elbv2types.TargetTypeEnumInstance,
+	})
+
+	require.ErrorContains(t, err, "cannot identify instance target")
+	require.Len(t, targets, 1)
+	assert.Equal(t, "instance-id", targets[0].Id)
+	assert.Nil(t, targets[0].Arn)
+}
+
 func TestTargetResourceARNPreservesCanonicalAWSResourceIDs(t *testing.T) {
 	t.Parallel()
 

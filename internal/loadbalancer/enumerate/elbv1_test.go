@@ -32,6 +32,20 @@ func TestClassicTargetPortsAreNotInferredFromListeners(t *testing.T) {
 	assert.Nil(t, targets[0].Port)
 }
 
+func TestClassicTargetIsRetainedWhenARNConstructionFails(t *testing.T) {
+	t.Parallel()
+
+	targets, errs := targetsForLoadBalancerV1(types.LoadBalancerDescription{
+		LoadBalancerName: aws.String("example"),
+		Instances:        []types.Instance{{InstanceId: aws.String("instance-id")}},
+	}, "", "")
+
+	require.Len(t, errs, 1)
+	require.Len(t, targets, 1)
+	assert.Equal(t, "instance-id", targets[0].Id)
+	assert.Nil(t, targets[0].Arn)
+}
+
 func TestClassicLoadBalancerUsesAuthoritativeARNAndOptionalListenerARN(t *testing.T) {
 	t.Parallel()
 

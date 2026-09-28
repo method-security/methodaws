@@ -451,9 +451,9 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 		targetARN, err := targetResourceARN(targetGroup, target)
 		if err != nil {
 			errs = append(errs, err)
-			continue
+		} else {
+			target.Arn = targetARN
 		}
-		target.Arn = targetARN
 		if targetHealth.Target.Port != nil {
 			portValue := int(*targetHealth.Target.Port)
 			target.Port = &portValue
