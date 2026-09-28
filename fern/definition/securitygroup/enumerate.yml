@@ -21,6 +21,7 @@ types:
 # RuleSupporting Structs
   ReferencedSecurityGroup:
     properties:
+      arn: optional<string>
       groupId: string
       userId: optional<string>
   RulePeerInfo:

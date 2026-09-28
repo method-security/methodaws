@@ -7,6 +7,7 @@ import (
 
 	"github.com/Method-Security/methodaws/generated/go/common"
 	ec2 "github.com/Method-Security/methodaws/generated/go/ec2"
+	"github.com/Method-Security/methodaws/internal/networkreferences"
 	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -14,7 +15,12 @@ import (
 )
 
 // convertInstanceToFern converts AWS EC2 Instance to Fern Ec2Instance
-func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, region, ownerID string) (*ec2.Ec2Instance, []string) {
+func convertInstanceToFern(
+	ctx context.Context,
+	awsInstance types.Instance,
+	region, ownerID string,
+	networkResolver *networkreferences.Resolver,
+) (*ec2.Ec2Instance, []string) {
 	if aws.ToString(awsInstance.InstanceId) == "" || region == "" {
 		return nil, []string{"Instance ID or region is empty"}
 	}
@@ -47,13 +53,18 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 	// Convert network interfaces
 	var networkInterfaces []*ec2.InstanceNetworkInterface
 	if len(awsInstance.NetworkInterfaces) > 0 {
-		networkInterfaces, errors = convertNetworkInterfaces(ctx, awsInstance.NetworkInterfaces, region)
+		networkInterfaces, errors = convertNetworkInterfaces(ctx, awsInstance.NetworkInterfaces, region, networkResolver)
 	}
 
-	// Extract security group IDs
-	var securityGroupIds []string
+	var securityGroups []*common.SecurityGroupReference
 	if len(awsInstance.SecurityGroups) > 0 {
-		securityGroupIds = extractSecurityGroupIds(awsInstance.SecurityGroups)
+		if networkResolver != nil {
+			var errs []error
+			securityGroups, errs = networkResolver.SecurityGroups(ctx, extractSecurityGroupIds(awsInstance.SecurityGroups))
+			for _, err := range errs {
+				errors = append(errors, fmt.Sprintf("cannot resolve instance security group: %s", err))
+			}
+		}
 	}
 	// Instance-profile roles are resolved separately during enumeration.
 
@@ -92,7 +103,7 @@ func convertInstanceToFern(ctx context.Context, awsInstance types.Instance, regi
 		},
 		Resources: &ec2.Ec2InstanceResourceInfo{
 			NetworkInterfaces: networkInterfaces,
-			SecurityGroupIds:  securityGroupIds,
+			SecurityGroups:    securityGroups,
 			Dns:               dnsData,
 		},
 	}
@@ -176,7 +187,12 @@ func convertPlacement(placement *types.Placement) *ec2.Placement {
 }
 
 // convertNetworkInterfaces converts AWS network interfaces to Fern format
-func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNetworkInterface, region string) ([]*ec2.InstanceNetworkInterface, []string) {
+func convertNetworkInterfaces(
+	ctx context.Context,
+	interfaces []types.InstanceNetworkInterface,
+	region string,
+	networkResolver *networkreferences.Resolver,
+) ([]*ec2.InstanceNetworkInterface, []string) {
 	var fernInterfaces []*ec2.InstanceNetworkInterface
 	var errors []string
 	log := svc1log.FromContext(ctx)
@@ -199,22 +215,30 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 			status = &statusStr
 		}
 
-		// Prepare subnet IDs if available
-		var subnetIds []string
+		var subnetIDs []string
 		if aws.ToString(ni.SubnetId) != "" {
-			subnetIds = []string{*ni.SubnetId}
+			subnetIDs = []string{*ni.SubnetId}
 		}
 
-		// Create VPC reference
 		var vpcReference *common.VpcReference
 		if aws.ToString(ni.VpcId) != "" {
-			vpcReference = &common.VpcReference{
-				Id:        *ni.VpcId,
-				Region:    region,
-				SubnetIds: subnetIds,
+			if networkResolver != nil {
+				var errs []error
+				vpcReference, errs = networkResolver.Vpc(ctx, *ni.VpcId, subnetIDs)
+				for _, err := range errs {
+					errors = append(errors, fmt.Sprintf("cannot resolve network interface %s VPC reference: %s", *ni.NetworkInterfaceId, err))
+				}
 			}
 		} else {
 			errors = append(errors, fmt.Sprintf("Network interface %s has no VPC ID", *ni.NetworkInterfaceId))
+		}
+		var securityGroups []*common.SecurityGroupReference
+		if networkResolver != nil {
+			var errs []error
+			securityGroups, errs = networkResolver.SecurityGroups(ctx, extractSecurityGroupIds(ni.Groups))
+			for _, err := range errs {
+				errors = append(errors, fmt.Sprintf("cannot resolve network interface %s security group: %s", *ni.NetworkInterfaceId, err))
+			}
 		}
 
 		// Create network interface with nested structure
@@ -256,8 +280,8 @@ func convertNetworkInterfaces(ctx context.Context, interfaces []types.InstanceNe
 		}
 		if vpcReference != nil {
 			fernNI.Resources = &ec2.InstanceNetworkInterfaceResourceInfo{
-				Vpc:              vpcReference,
-				SecurityGroupIds: extractSecurityGroupIds(ni.Groups),
+				Vpc:            vpcReference,
+				SecurityGroups: securityGroups,
 			}
 		}
 

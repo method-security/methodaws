@@ -79,7 +79,7 @@ types:
   InstanceNetworkInterfaceResourceInfo:
     properties:
       vpc: common.VpcReference
-      securityGroupIds: optional<list<string>>
+      securityGroups: optional<list<common.SecurityGroupReference>>
 # Main Network Interface Structs
   InstanceNetworkInterface:
     properties:
@@ -110,7 +110,7 @@ types:
     properties:
       networkInterfaces: optional<list<InstanceNetworkInterface>>
       iamRole: optional<common.IamRoleReference>
-      securityGroupIds: optional<list<string>>
+      securityGroups: optional<list<common.SecurityGroupReference>>
       dns: optional<dnsData>
 # EC2 Main Structs
   Ec2Instance:

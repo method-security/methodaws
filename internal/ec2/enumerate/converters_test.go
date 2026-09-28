@@ -4,11 +4,31 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Method-Security/methodaws/internal/networkreferences"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	ec2aws "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type networkStub struct{}
+
+func (networkStub) DescribeVpcs(_ context.Context, input *ec2aws.DescribeVpcsInput, _ ...func(*ec2aws.Options)) (*ec2aws.DescribeVpcsOutput, error) {
+	return &ec2aws.DescribeVpcsOutput{Vpcs: []types.Vpc{{VpcId: &input.VpcIds[0], OwnerId: aws.String("123456789012")}}}, nil
+}
+
+func (networkStub) DescribeSubnets(_ context.Context, input *ec2aws.DescribeSubnetsInput, _ ...func(*ec2aws.Options)) (*ec2aws.DescribeSubnetsOutput, error) {
+	return &ec2aws.DescribeSubnetsOutput{Subnets: []types.Subnet{{SubnetId: &input.SubnetIds[0], OwnerId: aws.String("123456789012")}}}, nil
+}
+
+func (networkStub) DescribeSecurityGroups(_ context.Context, input *ec2aws.DescribeSecurityGroupsInput, _ ...func(*ec2aws.Options)) (*ec2aws.DescribeSecurityGroupsOutput, error) {
+	return &ec2aws.DescribeSecurityGroupsOutput{SecurityGroups: []types.SecurityGroup{{GroupId: &input.GroupIds[0], OwnerId: aws.String("123456789012")}}}, nil
+}
+
+func testNetworkResolver(region string) *networkreferences.Resolver {
+	return networkreferences.New(networkStub{}, region)
+}
 
 func TestConvertInstanceUsesResourceOwnersForARNs(t *testing.T) {
 	t.Parallel()
@@ -25,7 +45,7 @@ func TestConvertInstanceUsesResourceOwnersForARNs(t *testing.T) {
 				VpcId:              aws.String("vpc-0123456789abcdef0"),
 			},
 		},
-	}, "us-east-1", "123456789012")
+	}, "us-east-1", "123456789012", testNetworkResolver("us-east-1"))
 
 	require.Empty(t, errors)
 	require.NotNil(t, instance)
@@ -48,7 +68,7 @@ func TestConvertNetworkInterfacesIncludesEveryPrivateIPAddress(t *testing.T) {
 			{PrivateIpAddress: aws.String("10.0.0.10"), Primary: aws.Bool(true)},
 			{PrivateIpAddress: aws.String("10.0.0.11"), Primary: aws.Bool(false)},
 		},
-	}}, "us-east-1")
+	}}, "us-east-1", testNetworkResolver("us-east-1"))
 
 	require.Empty(t, errs)
 	require.Len(t, interfaces, 1)
@@ -79,7 +99,7 @@ func TestInstanceARNPartitions(t *testing.T) {
 					NetworkInterfaceId: aws.String("eni-0123456789abcdef0"),
 					OwnerId:            aws.String("123456789012"), VpcId: aws.String("vpc-0123456789abcdef0"),
 				}},
-			}, tc.region, "123456789012")
+			}, tc.region, "123456789012", testNetworkResolver(tc.region))
 			require.Empty(t, errs)
 			require.NotNil(t, instance)
 			prefix := "arn:" + tc.partition + ":ec2:" + tc.region + ":123456789012:"
@@ -96,7 +116,7 @@ func TestInvalidIdentityDoesNotEmitInstance(t *testing.T) {
 	} {
 		instance, errs := convertInstanceToFern(context.Background(), types.Instance{
 			InstanceId: aws.String("i-0123456789abcdef0"),
-		}, tc.region, tc.owner)
+		}, tc.region, tc.owner, nil)
 		assert.Nil(t, instance)
 		assert.NotEmpty(t, errs)
 	}
@@ -119,11 +139,11 @@ func TestInvalidInterfaceDoesNotDiscardInstanceOrOtherInterfaces(t *testing.T) {
 				Groups: []types.GroupIdentifier{{GroupId: aws.String("sg-second")}},
 			},
 		},
-	}, "us-east-1", "123456789012")
+	}, "us-east-1", "123456789012", testNetworkResolver("us-east-1"))
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "eni-no-owner")
 	require.NotNil(t, instance)
 	require.Len(t, instance.Resources.NetworkInterfaces, 2)
-	assert.Equal(t, []string{"sg-first"}, instance.Resources.NetworkInterfaces[0].Resources.SecurityGroupIds)
-	assert.Equal(t, []string{"sg-second"}, instance.Resources.NetworkInterfaces[1].Resources.SecurityGroupIds)
+	assert.Equal(t, "arn:aws:ec2:us-east-1:123456789012:security-group/sg-first", instance.Resources.NetworkInterfaces[0].Resources.SecurityGroups[0].Arn)
+	assert.Equal(t, "arn:aws:ec2:us-east-1:123456789012:security-group/sg-second", instance.Resources.NetworkInterfaces[1].Resources.SecurityGroups[0].Arn)
 }

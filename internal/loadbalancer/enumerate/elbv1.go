@@ -6,10 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Method-Security/methodaws/generated/go/common"
 	loadbalancerfern "github.com/Method-Security/methodaws/generated/go/loadbalancer"
+	"github.com/Method-Security/methodaws/internal/networkreferences"
 	methodawsutils "github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -48,6 +49,7 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 	cfg.Region = region
 
 	client := elasticloadbalancing.NewFromConfig(cfg)
+	networkResolver := networkreferences.New(ec2.NewFromConfig(cfg), region)
 	paginator := elasticloadbalancing.NewDescribeLoadBalancersPaginator(client, &elasticloadbalancing.DescribeLoadBalancersInput{})
 
 	var loadBalancers []*loadbalancerfern.LoadBalancerInstance
@@ -110,13 +112,17 @@ func enumerateV1LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 						subnetIDs = append(subnetIDs, subnetID)
 					}
 				}
-				resources.Vpc = &common.VpcReference{
-					Id:        aws.ToString(lb.VPCId),
-					Region:    region,
-					SubnetIds: subnetIDs,
+				vpcReference, errors := networkResolver.Vpc(ctx, aws.ToString(lb.VPCId), subnetIDs)
+				resources.Vpc = vpcReference
+				for _, err := range errors {
+					errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s in region %s: %s", identification.Arn, region, err))
 				}
 			}
-			resources.SecurityGroups = createSecurityGroupReferences(lb.SecurityGroups, region)
+			securityGroups, networkErrors := networkResolver.SecurityGroups(ctx, lb.SecurityGroups)
+			resources.SecurityGroups = securityGroups
+			for _, err := range networkErrors {
+				errorMessages = append(errorMessages, fmt.Sprintf("Classic load balancer %s in region %s: %s", identification.Arn, region, err))
+			}
 
 			// Create LoadBalancerInstance
 			loadBalancer := &loadbalancerfern.LoadBalancerInstance{
@@ -228,18 +234,4 @@ func listenersForLoadBalancerV1(loadBalancer types.LoadBalancerDescription) ([]*
 		listeners = append(listeners, fernListener)
 	}
 	return listeners, errorMessages
-}
-
-// createSecurityGroupReferences creates security group references from AWS security groups
-func createSecurityGroupReferences(sgIDs []string, region string) []*common.SecurityGroupReference {
-	var securityGroups []*common.SecurityGroupReference
-	for _, sgID := range sgIDs {
-		if sgID != "" {
-			securityGroups = append(securityGroups, &common.SecurityGroupReference{
-				Id:     sgID,
-				Region: region,
-			})
-		}
-	}
-	return securityGroups
 }

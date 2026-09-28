@@ -11,7 +11,7 @@ import (
 )
 
 func TestConvertEC2SecurityGroupRequiresID(t *testing.T) {
-	securityGroup, errs := convertAWSEC2SecurityGroupToFern(context.Background(), aws.Config{}, types.SecurityGroup{}, "us-east-1")
+	securityGroup, errs := convertAWSEC2SecurityGroupToFern(context.Background(), aws.Config{}, types.SecurityGroup{}, "us-east-1", nil)
 
 	require.Nil(t, securityGroup)
 	require.Equal(t, []string{"EC2 security group ID is missing"}, errs)
@@ -27,7 +27,7 @@ func TestConvertEC2SecurityGroupRuleIncludesPrefixListPeer(t *testing.T) {
 		IpProtocol:          aws.String("tcp"),
 		FromPort:            aws.Int32(443),
 		ToPort:              aws.Int32(443),
-	})
+	}, "us-east-1")
 
 	require.NoError(t, err)
 	require.NotNil(t, rule)
@@ -41,7 +41,7 @@ func TestConvertEC2SecurityGroupRuleKeepsMissingReferencedGroupOwnerUnset(t *tes
 		SecurityGroupRuleId: aws.String("sgr-0123456789abcdef0"),
 		IsEgress:            aws.Bool(false),
 		ReferencedGroupInfo: &types.ReferencedSecurityGroup{GroupId: aws.String("sg-0123456789abcdef0")},
-	})
+	}, "us-east-1")
 
 	require.NoError(t, err)
 	assert.Nil(t, rule.Resources.Peer.ReferencedSecurityGroup.UserId)
