@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	common "github.com/Method-Security/methodaws/generated/go/common"
 	loadbalancerfern "github.com/Method-Security/methodaws/generated/go/loadbalancer"
+	"github.com/Method-Security/methodaws/internal/networkreferences"
+	methodawsutils "github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
@@ -62,6 +64,7 @@ func enumerateV2LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 	cfg.Region = region
 
 	client := elasticloadbalancingv2.NewFromConfig(cfg)
+	networkResolver := networkreferences.New(ec2.NewFromConfig(cfg), region)
 	paginator := elasticloadbalancingv2.NewDescribeLoadBalancersPaginator(client, &elasticloadbalancingv2.DescribeLoadBalancersInput{})
 
 	var loadBalancers []*loadbalancerfern.LoadBalancerInstance
@@ -150,9 +153,23 @@ func enumerateV2LoadBalancersForRegion(ctx context.Context, cfg aws.Config, regi
 
 			// Add resource references with deduplication
 			if lb.VpcId != nil {
-				resources.Vpc = createVpcReferenceFromLB(lb, region)
+				var subnetIDs []string
+				for _, az := range lb.AvailabilityZones {
+					if aws.ToString(az.SubnetId) != "" {
+						subnetIDs = append(subnetIDs, *az.SubnetId)
+					}
+				}
+				vpcReference, errors := networkResolver.Vpc(ctx, aws.ToString(lb.VpcId), subnetIDs)
+				resources.Vpc = vpcReference
+				for _, err := range errors {
+					errorMessages = append(errorMessages, fmt.Sprintf("Load balancer %s in region %s: %s", *lb.LoadBalancerArn, region, err))
+				}
 			}
-			resources.SecurityGroups = createSecurityGroupReferencesFromLB(lb.SecurityGroups, region)
+			securityGroups, networkErrors := networkResolver.SecurityGroups(ctx, lb.SecurityGroups)
+			resources.SecurityGroups = securityGroups
+			for _, err := range networkErrors {
+				errorMessages = append(errorMessages, fmt.Sprintf("Load balancer %s in region %s: %s", *lb.LoadBalancerArn, region, err))
+			}
 
 			// Create LoadBalancerInstance
 			loadBalancer := &loadbalancerfern.LoadBalancerInstance{
@@ -431,6 +448,12 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 			Type:             targetType,
 			AvailabilityZone: availabilityZone,
 		}
+		targetARN, err := targetResourceARN(targetGroup, target)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			target.Arn = targetARN
+		}
 		if targetHealth.Target.Port != nil {
 			portValue := int(*targetHealth.Target.Port)
 			target.Port = &portValue
@@ -438,6 +461,33 @@ func targetsForTargetGroupV2(ctx context.Context, client elbv2ResourceAPI, targe
 		targets = append(targets, target)
 	}
 	return targets, errors.Join(errs...)
+}
+
+func targetResourceARN(targetGroup types.TargetGroup, target *loadbalancerfern.Target) (*string, error) {
+	if target == nil || target.Id == "" {
+		return nil, nil
+	}
+	switch target.Type {
+	case loadbalancerfern.TargetTypeIp:
+		return nil, nil
+	case loadbalancerfern.TargetTypeLambda, loadbalancerfern.TargetTypeAlb:
+		if strings.HasPrefix(target.Id, "arn:") {
+			return &target.Id, nil
+		}
+		return nil, fmt.Errorf("target group %s target %s is missing an ARN", aws.ToString(targetGroup.TargetGroupArn), target.Id)
+	case loadbalancerfern.TargetTypeInstance:
+		parsed, err := arn.Parse(aws.ToString(targetGroup.TargetGroupArn))
+		if err != nil || parsed.AccountID == "" || parsed.Region == "" {
+			return nil, fmt.Errorf("target group %s cannot identify instance target %s", aws.ToString(targetGroup.TargetGroupArn), target.Id)
+		}
+		targetARN, err := methodawsutils.BuildRegionalARN(parsed.Region, "ec2", parsed.AccountID, "instance/"+target.Id)
+		if err != nil {
+			return nil, fmt.Errorf("target group %s cannot identify instance target %s: %w", aws.ToString(targetGroup.TargetGroupArn), target.Id, err)
+		}
+		return &targetARN, nil
+	default:
+		return nil, nil
+	}
 }
 
 func certificatesForListenerV2(ctx context.Context, client elbv2ResourceAPI, listenerARN *string) ([]*loadbalancerfern.Certificate, []string) {
@@ -464,46 +514,4 @@ func certificatesForListenerV2(ctx context.Context, client elbv2ResourceAPI, lis
 		}
 	}
 	return certs, errors
-}
-
-// Resource discovery helper functions with deduplication
-func createVpcReferenceFromLB(lb types.LoadBalancer, region string) *common.VpcReference {
-	if aws.ToString(lb.VpcId) == "" {
-		return nil
-	}
-
-	var subnetIds []string
-	for _, az := range lb.AvailabilityZones {
-		if aws.ToString(az.SubnetId) != "" {
-			subnetIds = append(subnetIds, *az.SubnetId)
-		}
-	}
-
-	return &common.VpcReference{
-		Id:        *lb.VpcId,
-		Region:    region,
-		SubnetIds: subnetIds,
-	}
-}
-
-func createSecurityGroupReferencesFromLB(sgIDs []string, region string) []*common.SecurityGroupReference {
-	sgMap := make(map[string]*common.SecurityGroupReference)
-
-	for _, sgID := range sgIDs {
-		if sgID != "" {
-			key := sgID
-			if _, exists := sgMap[key]; !exists {
-				sgMap[key] = &common.SecurityGroupReference{
-					Id:     sgID,
-					Region: region,
-				}
-			}
-		}
-	}
-
-	var securityGroups []*common.SecurityGroupReference
-	for _, sg := range sgMap {
-		securityGroups = append(securityGroups, sg)
-	}
-	return securityGroups
 }

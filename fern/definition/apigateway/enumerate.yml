@@ -82,6 +82,7 @@ types:
       vpcLinkId: string
       loadBalancerArn: optional<string>
       loadBalancerArns: optional<list<string>>
+      loadBalancerType: optional<common.LoadBalancerType>
       listenerArn: optional<string>
       dnsName: optional<string>
   ServiceDiscoveryBackend:

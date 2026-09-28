@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	ec2 "github.com/Method-Security/methodaws/generated/go/ec2"
+	"github.com/Method-Security/methodaws/internal/networkreferences"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ec2aws "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -75,6 +76,7 @@ func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region str
 	regionConfig := awsConfig.Copy()
 	regionConfig.Region = region
 	client := ec2aws.NewFromConfig(regionConfig)
+	networkResolver := networkreferences.New(client, region)
 	iamClient := iamaws.NewFromConfig(regionConfig)
 
 	// Get all instances
@@ -88,7 +90,7 @@ func enumerateEc2ForRegion(ctx context.Context, awsConfig aws.Config, region str
 	// Process each instance
 	for _, reservation := range reservations {
 		for _, awsInstance := range reservation.Instances {
-			instance, errs := processInstance(ctx, awsInstance, region, aws.ToString(reservation.OwnerId))
+			instance, errs := processInstance(ctx, awsInstance, region, aws.ToString(reservation.OwnerId), networkResolver)
 			if instance != nil {
 				role, err := profileCache.resolveRole(ctx, iamClient, awsInstance.IamInstanceProfile)
 				if err != nil {
@@ -126,9 +128,14 @@ func getAllReservations(ctx context.Context, client *ec2aws.Client, region strin
 }
 
 // processInstance converts an AWS instance to Fern format
-func processInstance(ctx context.Context, awsInstance types.Instance, region, ownerID string) (*ec2.Ec2Instance, []string) {
+func processInstance(
+	ctx context.Context,
+	awsInstance types.Instance,
+	region, ownerID string,
+	networkResolver *networkreferences.Resolver,
+) (*ec2.Ec2Instance, []string) {
 	log := svc1log.FromContext(ctx)
 	log.Info("Processing ec2aws instance", svc1log.SafeParam("instanceId", awsInstance.InstanceId))
 	// Child conversion errors must not discard an identified instance.
-	return convertInstanceToFern(ctx, awsInstance, region, ownerID)
+	return convertInstanceToFern(ctx, awsInstance, region, ownerID, networkResolver)
 }

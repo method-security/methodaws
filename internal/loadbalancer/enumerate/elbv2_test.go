@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	loadbalancerfern "github.com/Method-Security/methodaws/generated/go/loadbalancer"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
@@ -149,13 +150,51 @@ func TestTargetPortRemainsUnsetWhenAWSOmitsIt(t *testing.T) {
 	}}
 
 	targets, err := targetsForTargetGroupV2(context.Background(), client, elbv2types.TargetGroup{
-		TargetGroupArn: aws.String("target-group"),
+		TargetGroupArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/example/id"),
 		TargetType:     elbv2types.TargetTypeEnumInstance,
 	})
 
 	require.ErrorContains(t, err, "target without an ID")
 	require.Len(t, targets, 1)
 	assert.Nil(t, targets[0].Port)
+	assert.Equal(t, "arn:aws:ec2:us-east-1:123456789012:instance/instance-id", aws.ToString(targets[0].Arn))
+}
+
+func TestTargetIsRetainedWhenARNConstructionFails(t *testing.T) {
+	t.Parallel()
+
+	client := &stubELBV2ResourceClient{targetHealth: &elasticloadbalancingv2.DescribeTargetHealthOutput{
+		TargetHealthDescriptions: []elbv2types.TargetHealthDescription{{
+			Target: &elbv2types.TargetDescription{Id: aws.String("instance-id")},
+		}},
+	}}
+
+	targets, err := targetsForTargetGroupV2(context.Background(), client, elbv2types.TargetGroup{
+		TargetGroupArn: aws.String("not-an-arn"),
+		TargetType:     elbv2types.TargetTypeEnumInstance,
+	})
+
+	require.ErrorContains(t, err, "cannot identify instance target")
+	require.Len(t, targets, 1)
+	assert.Equal(t, "instance-id", targets[0].Id)
+	assert.Nil(t, targets[0].Arn)
+}
+
+func TestTargetResourceARNPreservesCanonicalAWSResourceIDs(t *testing.T) {
+	t.Parallel()
+
+	instanceTarget := &loadbalancerfern.Target{Id: "i-0123456789abcdef0", Type: loadbalancerfern.TargetTypeInstance}
+	targetARN, err := targetResourceARN(elbv2types.TargetGroup{
+		TargetGroupArn: aws.String("arn:aws-us-gov:elasticloadbalancing:us-gov-west-1:123456789012:targetgroup/example/id"),
+	}, instanceTarget)
+	require.NoError(t, err)
+	assert.Equal(t, "arn:aws-us-gov:ec2:us-gov-west-1:123456789012:instance/i-0123456789abcdef0", aws.ToString(targetARN))
+
+	lambdaARN := "arn:aws:lambda:us-east-1:123456789012:function:processor"
+	lambdaTarget := &loadbalancerfern.Target{Id: lambdaARN, Type: loadbalancerfern.TargetTypeLambda}
+	targetARN, err = targetResourceARN(elbv2types.TargetGroup{}, lambdaTarget)
+	require.NoError(t, err)
+	assert.Equal(t, lambdaARN, aws.ToString(targetARN))
 }
 
 func TestTargetGroupIsRetainedWhenTargetHealthIsUnavailable(t *testing.T) {

@@ -10,6 +10,8 @@ import (
 	// Generated
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	fernsecuritygroup "github.com/Method-Security/methodaws/generated/go/securitygroup"
+	"github.com/Method-Security/methodaws/internal/networkreferences"
+	"github.com/Method-Security/methodaws/utils"
 
 	// External
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -74,6 +76,9 @@ func EnumerateSecurityGroups(ctx context.Context, cfg aws.Config, config fernsec
 			continue
 		}
 		log.Info("Processing SecurityGroups in region", svc1log.SafeParam("region", region))
+		regionConfig := cfg.Copy()
+		regionConfig.Region = region
+		networkResolver := networkreferences.New(ec2.NewFromConfig(regionConfig), region)
 
 		// Enumerate EC2 security groups
 		ec2SecurityGroups, ec2Errors := enumerateEC2SecurityGroupForRegion(ctx, cfg, region)
@@ -90,7 +95,7 @@ func EnumerateSecurityGroups(ctx context.Context, cfg aws.Config, config fernsec
 
 		// Convert AWS SDK EC2 SecurityGroups to Fern SecurityGroups
 		for _, sg := range ec2SecurityGroups {
-			fernSG, errors := convertAWSEC2SecurityGroupToFern(ctx, cfg, sg, region)
+			fernSG, errors := convertAWSEC2SecurityGroupToFern(ctx, cfg, sg, region, networkResolver)
 			allErrors = append(allErrors, errors...)
 			if fernSG != nil {
 				allSecurityGroups = append(allSecurityGroups, fernSG)
@@ -99,7 +104,7 @@ func EnumerateSecurityGroups(ctx context.Context, cfg aws.Config, config fernsec
 
 		// Convert AWS SDK RDS DB SecurityGroups to Fern SecurityGroups
 		for _, sg := range rdsSecurityGroups {
-			fernSG, errors := convertAWSRDSSecurityGroupToFern(sg, region)
+			fernSG, errors := convertAWSRDSSecurityGroupToFern(ctx, sg, region, networkResolver)
 			allErrors = append(allErrors, errors...)
 			if fernSG != nil {
 				allSecurityGroups = append(allSecurityGroups, fernSG)
@@ -203,7 +208,13 @@ func enumerateRDSSecurityGroupForRegion(ctx context.Context, cfg aws.Config, reg
 }
 
 // convertAWSEC2SecurityGroupToFern converts an AWS SDK EC2 SecurityGroup to a Fern SecurityGroup
-func convertAWSEC2SecurityGroupToFern(ctx context.Context, cfg aws.Config, awsSG ec2types.SecurityGroup, region string) (*fernsecuritygroup.SecurityGroup, []string) {
+func convertAWSEC2SecurityGroupToFern(
+	ctx context.Context,
+	cfg aws.Config,
+	awsSG ec2types.SecurityGroup,
+	region string,
+	networkResolver *networkreferences.Resolver,
+) (*fernsecuritygroup.SecurityGroup, []string) {
 	log := svc1log.FromContext(ctx)
 	var errors []string
 	if !hasValue(awsSG.GroupId) {
@@ -237,7 +248,7 @@ func convertAWSEC2SecurityGroupToFern(ctx context.Context, cfg aws.Config, awsSG
 			errors = append(errors, fmt.Sprintf("security group %s returned rule %s for a different or empty group", *awsSG.GroupId, aws.ToString(rule.SecurityGroupRuleId)))
 			continue
 		}
-		fernPerm, err := convertAWSEC2SecurityGroupRuleToFern(rule)
+		fernPerm, err := convertAWSEC2SecurityGroupRuleToFern(rule, region)
 		if err != nil {
 			log.Warn("Failed to convert SecurityGroupRule", svc1log.SafeParam("rule", rule), svc1log.Stacktrace(err))
 			errors = append(errors, fmt.Sprintf("security group %s in %s: %v", *awsSG.GroupId, region, err))
@@ -265,9 +276,10 @@ func convertAWSEC2SecurityGroupToFern(ctx context.Context, cfg aws.Config, awsSG
 	// Create VPC reference if VPC ID exists
 	var vpcReference *common.VpcReference
 	if hasValue(awsSG.VpcId) {
-		vpcReference = &common.VpcReference{
-			Id:     *awsSG.VpcId,
-			Region: region,
+		var errs []error
+		vpcReference, errs = networkResolver.Vpc(ctx, *awsSG.VpcId, nil)
+		for _, err := range errs {
+			errors = append(errors, fmt.Sprintf("security group %s cannot resolve VPC %s: %s", *awsSG.GroupId, *awsSG.VpcId, err))
 		}
 	} else if awsSG.VpcId != nil {
 		errors = append(errors, fmt.Sprintf("security group %s has an empty VPC ID", *awsSG.GroupId))
@@ -301,7 +313,7 @@ func convertAWSEC2SecurityGroupToFern(ctx context.Context, cfg aws.Config, awsSG
 	return fernSG, errors
 }
 
-func convertAWSEC2SecurityGroupRuleToFern(rule ec2types.SecurityGroupRule) (*fernsecuritygroup.RuleDetails, error) {
+func convertAWSEC2SecurityGroupRuleToFern(rule ec2types.SecurityGroupRule, region string) (*fernsecuritygroup.RuleDetails, error) {
 	if !hasValue(rule.SecurityGroupRuleId) {
 		return nil, fmt.Errorf("SecurityGroupRule missing ID")
 	}
@@ -360,6 +372,13 @@ func convertAWSEC2SecurityGroupRuleToFern(rule ec2types.SecurityGroupRule) (*fer
 			GroupId: *rule.ReferencedGroupInfo.GroupId,
 			UserId:  rule.ReferencedGroupInfo.UserId,
 		}
+		if hasValue(rule.ReferencedGroupInfo.UserId) {
+			securityGroupARN, err := utils.BuildRegionalARN(region, "ec2", *rule.ReferencedGroupInfo.UserId, "security-group/"+*rule.ReferencedGroupInfo.GroupId)
+			if err != nil {
+				return nil, fmt.Errorf("SecurityGroupRule %s referenced group ARN: %w", *rule.SecurityGroupRuleId, err)
+			}
+			peer.ReferencedSecurityGroup.Arn = &securityGroupARN
+		}
 		peerCount++
 	}
 	if rule.PrefixListId != nil {
@@ -377,7 +396,12 @@ func convertAWSEC2SecurityGroupRuleToFern(rule ec2types.SecurityGroupRule) (*fer
 }
 
 // convertAWSRDSSecurityGroupToFern converts an AWS SDK RDS DB SecurityGroup to a Fern SecurityGroup
-func convertAWSRDSSecurityGroupToFern(awsSG rdstypes.DBSecurityGroup, region string) (*fernsecuritygroup.SecurityGroup, []string) {
+func convertAWSRDSSecurityGroupToFern(
+	ctx context.Context,
+	awsSG rdstypes.DBSecurityGroup,
+	region string,
+	networkResolver *networkreferences.Resolver,
+) (*fernsecuritygroup.SecurityGroup, []string) {
 	if !hasValue(awsSG.DBSecurityGroupName) || strings.TrimSpace(region) == "" {
 		return nil, []string{"RDS DB security group name or region is missing"}
 	}
@@ -392,9 +416,10 @@ func convertAWSRDSSecurityGroupToFern(awsSG rdstypes.DBSecurityGroup, region str
 	// Create VPC reference if VPC ID exists
 	var vpcReference *common.VpcReference
 	if hasValue(awsSG.VpcId) {
-		vpcReference = &common.VpcReference{
-			Id:     *awsSG.VpcId,
-			Region: region,
+		var errs []error
+		vpcReference, errs = networkResolver.Vpc(ctx, *awsSG.VpcId, nil)
+		for _, err := range errs {
+			errors = append(errors, fmt.Sprintf("RDS DB security group %s cannot resolve VPC %s: %s", *groupARN, *awsSG.VpcId, err))
 		}
 	} else if awsSG.VpcId != nil {
 		errors = append(errors, fmt.Sprintf("RDS DB security group %s has an empty VPC ID", *groupARN))
@@ -426,6 +451,14 @@ func convertAWSRDSSecurityGroupToFern(awsSG rdstypes.DBSecurityGroup, region str
 			entry.SecurityGroup = &fernsecuritygroup.ReferencedSecurityGroup{
 				GroupId: *authorization.EC2SecurityGroupId,
 				UserId:  authorization.EC2SecurityGroupOwnerId,
+			}
+			if hasValue(authorization.EC2SecurityGroupOwnerId) {
+				securityGroupARN, err := utils.BuildRegionalARN(region, "ec2", *authorization.EC2SecurityGroupOwnerId, "security-group/"+*authorization.EC2SecurityGroupId)
+				if err != nil {
+					errors = append(errors, fmt.Sprintf("RDS DB security group %s authorization %d referenced group ARN: %s", *groupARN, i, err))
+				} else {
+					entry.SecurityGroup.Arn = &securityGroupARN
+				}
 			}
 		} else {
 			errors = append(errors, fmt.Sprintf("RDS DB security group %s EC2 authorization %d has no group ID; no group reference emitted", *groupARN, i))

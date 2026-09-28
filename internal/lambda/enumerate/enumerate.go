@@ -11,17 +11,24 @@ import (
 	// generated
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	lambdafern "github.com/Method-Security/methodaws/generated/go/lambda"
+	"github.com/Method-Security/methodaws/internal/networkreferences"
 	"github.com/Method-Security/methodaws/utils"
 
 	// external
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	svc1log "github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
 
-func parseLambdaFunctionConfiguration(ctx context.Context, function types.FunctionConfiguration, region string) (*lambdafern.LambdaFunction, error) {
+func parseLambdaFunctionConfiguration(
+	ctx context.Context,
+	function types.FunctionConfiguration,
+	region string,
+	networkResolver *networkreferences.Resolver,
+) (*lambdafern.LambdaFunction, error) {
 	log := svc1log.FromContext(ctx)
 	log.Info("Parsing Lambda function configuration",
 		svc1log.SafeParam("functionName", function.FunctionName),
@@ -72,11 +79,15 @@ func parseLambdaFunctionConfiguration(ctx context.Context, function types.Functi
 	}
 
 	var vpcReference *common.VpcReference
-	var securityGroupIds []string
+	var securityGroups []*common.SecurityGroupReference
 	if function.VpcConfig != nil {
-		vpcReference = createVpcReference(aws.ToString(function.VpcConfig.VpcId), function.VpcConfig.SubnetIds, region)
-		securityGroupIds = function.VpcConfig.SecurityGroupIds
-		if vpcReference == nil && (len(function.VpcConfig.SubnetIds) > 0 || len(securityGroupIds) > 0) {
+		var errs []error
+		vpcReference, errs = networkResolver.Vpc(ctx, aws.ToString(function.VpcConfig.VpcId), function.VpcConfig.SubnetIds)
+		parseErrors = append(parseErrors, errs...)
+		securityGroups, errs = networkResolver.SecurityGroups(ctx, function.VpcConfig.SecurityGroupIds)
+		parseErrors = append(parseErrors, errs...)
+		if aws.ToString(function.VpcConfig.VpcId) == "" &&
+			(len(function.VpcConfig.SubnetIds) > 0 || len(function.VpcConfig.SecurityGroupIds) > 0) {
 			parseErrors = append(parseErrors, errors.New("VPC configuration has subnet or security group entries but no VPC ID"))
 		}
 	}
@@ -145,7 +156,7 @@ func parseLambdaFunctionConfiguration(ctx context.Context, function types.Functi
 		Resources: &lambdafern.LambdaResourceInfo{
 			Vpc:            vpcReference,
 			IamRole:        roleReference,
-			SecurityGroups: createSecurityGroupReferences(securityGroupIds, region),
+			SecurityGroups: securityGroups,
 			CloudWatchLogs: cloudWatchLogs,
 		},
 	}
@@ -158,6 +169,7 @@ func enumerateLambdaForRegion(ctx context.Context, awsConfig aws.Config, region 
 
 	awsConfig.Region = region
 	lambdaClient := lambda.NewFromConfig(awsConfig)
+	networkResolver := networkreferences.New(ec2.NewFromConfig(awsConfig), region)
 	paginator := lambda.NewListFunctionsPaginator(lambdaClient, &lambda.ListFunctionsInput{
 		MaxItems: aws.Int32(50),
 	})
@@ -174,7 +186,7 @@ func enumerateLambdaForRegion(ctx context.Context, awsConfig aws.Config, region 
 			return functions, append(errors, wrappedErr)
 		}
 		for _, function := range page.Functions {
-			parsedFunction, err := parseLambdaFunctionConfiguration(ctx, function, region)
+			parsedFunction, err := parseLambdaFunctionConfiguration(ctx, function, region, networkResolver)
 			if err != nil {
 				wrappedErr := fmt.Errorf("function %s (%s) in region %s: %w",
 					aws.ToString(function.FunctionName), aws.ToString(function.FunctionArn), region, err)
@@ -224,25 +236,6 @@ func EnumerateLambda(ctx context.Context, awsConfig aws.Config, config lambdafer
 	return report
 }
 
-// Resource reference helper functions with deduplication
-func createVpcReference(vpcID string, subnetIds []string, region string) *common.VpcReference {
-	if vpcID == "" {
-		return nil
-	}
-
-	var validSubnetIDs []string
-	for _, subnetID := range subnetIds {
-		if subnetID != "" {
-			validSubnetIDs = append(validSubnetIDs, subnetID)
-		}
-	}
-	return &common.VpcReference{
-		Id:        vpcID,
-		Region:    region,
-		SubnetIds: validSubnetIDs,
-	}
-}
-
 func createIamRoleReference(roleArn string) *common.IamRoleReference {
 	parsed, err := arn.Parse(roleArn)
 	if err != nil || parsed.Partition == "" || parsed.AccountID == "" || parsed.Service != "iam" || parsed.Region != "" ||
@@ -261,28 +254,6 @@ func createIamRoleReference(roleArn string) *common.IamRoleReference {
 		Arn:      roleArn,
 		RoleName: roleNamePtr,
 	}
-}
-
-func createSecurityGroupReferences(sgIDs []string, region string) []*common.SecurityGroupReference {
-	sgMap := make(map[string]*common.SecurityGroupReference)
-
-	for _, sgID := range sgIDs {
-		if sgID != "" {
-			key := sgID
-			if _, exists := sgMap[key]; !exists {
-				sgMap[key] = &common.SecurityGroupReference{
-					Id:     sgID,
-					Region: region,
-				}
-			}
-		}
-	}
-
-	var securityGroups []*common.SecurityGroupReference
-	for _, sg := range sgMap {
-		securityGroups = append(securityGroups, sg)
-	}
-	return securityGroups
 }
 
 func createCloudWatchLogReferences(

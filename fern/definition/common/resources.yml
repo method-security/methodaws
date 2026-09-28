@@ -19,19 +19,30 @@ types:
       arn: string
       roleName: optional<string>
 # VPC Resources
+  SubnetReference:
+    properties:
+      arn: string
+      id: string
+      region: string
+      ownerId: string
   VpcReference:
     properties:
+      arn: string
       id: string
       region: string
-      subnetIds: optional<list<string>>
+      ownerId: string
+      subnets: optional<list<SubnetReference>>
   SecurityGroupReference:
     properties:
+      arn: string
       id: string
       region: string
+      ownerId: string
       name: optional<string>
 # EC2 Resources
   Ec2InstanceReference:
     properties:
+      arn: string
       id: string
       region: string
       instanceType: optional<string>
@@ -114,4 +125,5 @@ types:
   WebAclReference:
     properties:
       arn: string
+      name: optional<string>
       region: string

@@ -10,8 +10,10 @@ import (
 	common "github.com/Method-Security/methodaws/generated/go/common"
 	ec2 "github.com/Method-Security/methodaws/generated/go/ec2"
 	eksfern "github.com/Method-Security/methodaws/generated/go/eks"
+	"github.com/Method-Security/methodaws/internal/networkreferences"
 	"github.com/Method-Security/methodaws/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	eksTypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
@@ -70,6 +72,7 @@ func enumerateEksForRegion(ctx context.Context, cfg aws.Config, region string) (
 	cfg.Region = region
 
 	eksSvc := eks.NewFromConfig(cfg)
+	networkResolver := networkreferences.New(awsec2.NewFromConfig(cfg), region)
 	var clusters []*eksfern.EksInstance
 	var errors []string
 
@@ -93,7 +96,7 @@ func enumerateEksForRegion(ctx context.Context, cfg aws.Config, region string) (
 
 	// Process each cluster
 	for _, clusterName := range allClusterNames {
-		cluster, errs := processCluster(ctx, cfg, eksSvc, clusterName, region)
+		cluster, errs := processCluster(ctx, cfg, eksSvc, networkResolver, clusterName, region)
 		if cluster != nil {
 			clusters = append(clusters, cluster)
 		}
@@ -104,7 +107,14 @@ func enumerateEksForRegion(ctx context.Context, cfg aws.Config, region string) (
 }
 
 // processCluster processes a single EKS cluster and its node groups
-func processCluster(ctx context.Context, cfg aws.Config, eksSvc *eks.Client, clusterName string, region string) (*eksfern.EksInstance, []string) {
+func processCluster(
+	ctx context.Context,
+	cfg aws.Config,
+	eksSvc *eks.Client,
+	networkResolver *networkreferences.Resolver,
+	clusterName string,
+	region string,
+) (*eksfern.EksInstance, []string) {
 	var errors []string
 	log := svc1log.FromContext(ctx)
 
@@ -133,7 +143,8 @@ func processCluster(ctx context.Context, cfg aws.Config, eksSvc *eks.Client, clu
 	}
 
 	// Convert cluster to Fern format with new structure
-	cluster := convertClusterToFern(clusterDetail.Cluster, region)
+	cluster, networkErrors := convertClusterToFern(ctx, clusterDetail.Cluster, region, networkResolver)
+	errors = append(errors, networkErrors...)
 	if cluster == nil {
 		return nil, []string{fmt.Sprintf("Cluster %s has an incomplete identity or region", clusterName)}
 	}
@@ -781,9 +792,14 @@ func convertPodStatusToEnum(phase v1.PodPhase) *eksfern.PodStatus {
 }
 
 // convertClusterToFern converts AWS EKS cluster to Fern format with new structure
-func convertClusterToFern(cluster *eksTypes.Cluster, region string) *eksfern.EksInstance {
+func convertClusterToFern(
+	ctx context.Context,
+	cluster *eksTypes.Cluster,
+	region string,
+	networkResolver *networkreferences.Resolver,
+) (*eksfern.EksInstance, []string) {
 	if cluster == nil || aws.ToString(cluster.Arn) == "" || aws.ToString(cluster.Name) == "" || region == "" {
-		return nil
+		return nil, nil
 	}
 
 	// Create identification info
@@ -827,7 +843,7 @@ func convertClusterToFern(cluster *eksTypes.Cluster, region string) *eksfern.Eks
 	//   EncryptionConfig, ConnectorConfig, Health, OutpostConfig
 
 	// Discover and add AWS resource references
-	discoverEksResourceReferences(cluster, nil, resources, region)
+	networkErrors := discoverEksResourceReferences(ctx, cluster, nil, resources, region, networkResolver)
 
 	// Create EksInstance
 	fernCluster := &eksfern.EksInstance{
@@ -836,7 +852,7 @@ func convertClusterToFern(cluster *eksTypes.Cluster, region string) *eksfern.Eks
 		Resources:      resources,
 	}
 
-	return fernCluster
+	return fernCluster, networkErrors
 }
 
 func convertAccessConfigToFern(config *eksTypes.AccessConfigResponse) *eksfern.EksAccessConfig {
@@ -868,31 +884,6 @@ func createIamRoleReference(arn string) *common.IamRoleReference {
 	return &common.IamRoleReference{
 		Arn:      arn,
 		RoleName: &roleName,
-	}
-}
-
-// createVpcReference creates a VPC reference with subnet information
-func createVpcReference(vpcID string, subnetIds []string, region string) *common.VpcReference {
-	if vpcID == "" {
-		return nil
-	}
-
-	return &common.VpcReference{
-		Id:        vpcID,
-		Region:    region,
-		SubnetIds: subnetIds,
-	}
-}
-
-// createSecurityGroupReference creates a security group reference
-func createSecurityGroupReference(sgID, region string) *common.SecurityGroupReference {
-	if sgID == "" {
-		return nil
-	}
-
-	return &common.SecurityGroupReference{
-		Id:     sgID,
-		Region: region,
 	}
 }
 
@@ -941,12 +932,20 @@ func createCloudWatchLogReference(logGroupName, clusterARN, region string) *comm
 }
 
 // discoverEksResourceReferences discovers and sets AWS resource references for the EKS cluster
-func discoverEksResourceReferences(cluster *eksTypes.Cluster, nodeGroups interface{}, resources *eksfern.EksResourceInfo, region string) {
+func discoverEksResourceReferences(
+	ctx context.Context,
+	cluster *eksTypes.Cluster,
+	nodeGroups interface{},
+	resources *eksfern.EksResourceInfo,
+	region string,
+	networkResolver *networkreferences.Resolver,
+) []string {
 	var iamRoles []*common.IamRoleReference
 	var securityGroups []*common.SecurityGroupReference
 	var ec2Instances []*ec2.Ec2Instance
 	var kmsKeys []*common.KmsKeyReference
 	var cloudWatchLogs []*common.CloudWatchLogReference
+	var errors []string
 
 	// Track discovered resources to avoid duplicates
 	discoveredRoles := make(map[string]bool)
@@ -967,7 +966,10 @@ func discoverEksResourceReferences(cluster *eksTypes.Cluster, nodeGroups interfa
 	if cluster.ResourcesVpcConfig != nil {
 		// Set VPC reference
 		if cluster.ResourcesVpcConfig.VpcId != nil {
-			vpcRef := createVpcReference(*cluster.ResourcesVpcConfig.VpcId, cluster.ResourcesVpcConfig.SubnetIds, region)
+			vpcRef, errs := networkResolver.Vpc(ctx, *cluster.ResourcesVpcConfig.VpcId, cluster.ResourcesVpcConfig.SubnetIds)
+			for _, err := range errs {
+				errors = append(errors, fmt.Sprintf("cannot resolve EKS VPC reference: %s", err))
+			}
 			if vpcRef != nil {
 				resources.Vpc = vpcRef
 			}
@@ -976,8 +978,10 @@ func discoverEksResourceReferences(cluster *eksTypes.Cluster, nodeGroups interfa
 		// Discover security groups
 		for _, sgID := range cluster.ResourcesVpcConfig.SecurityGroupIds {
 			if !discoveredSGs[sgID] {
-				sgRef := createSecurityGroupReference(sgID, region)
-				if sgRef != nil {
+				sgRef, err := networkResolver.SecurityGroup(ctx, sgID)
+				if err != nil {
+					errors = append(errors, fmt.Sprintf("cannot resolve EKS security group %q: %s", sgID, err))
+				} else if sgRef != nil {
 					securityGroups = append(securityGroups, sgRef)
 					discoveredSGs[sgID] = true
 				}
@@ -988,8 +992,10 @@ func discoverEksResourceReferences(cluster *eksTypes.Cluster, nodeGroups interfa
 		if cluster.ResourcesVpcConfig.ClusterSecurityGroupId != nil {
 			sgID := *cluster.ResourcesVpcConfig.ClusterSecurityGroupId
 			if !discoveredSGs[sgID] {
-				sgRef := createSecurityGroupReference(sgID, region)
-				if sgRef != nil {
+				sgRef, err := networkResolver.SecurityGroup(ctx, sgID)
+				if err != nil {
+					errors = append(errors, fmt.Sprintf("cannot resolve EKS security group %q: %s", sgID, err))
+				} else if sgRef != nil {
 					securityGroups = append(securityGroups, sgRef)
 					discoveredSGs[sgID] = true
 				}
@@ -1045,4 +1051,5 @@ func discoverEksResourceReferences(cluster *eksTypes.Cluster, nodeGroups interfa
 	if len(cloudWatchLogs) > 0 {
 		resources.CloudWatchLogs = cloudWatchLogs
 	}
+	return errors
 }

@@ -85,6 +85,8 @@ types:
     properties:
       # AWS target ID, interpreted using type and the enclosing load balancer/target-group scope.
       id: string
+      # Canonical AWS resource ARN when the target type is an AWS resource with an ARN.
+      arn: optional<string>
       type: TargetType
       # V2 registered target port only. Classic backend ports are listener-specific.
       port: optional<integer>
