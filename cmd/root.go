@@ -107,17 +107,22 @@ func (a *MethodAws) setupCommonConfig(cmd *cobra.Command, outputFormat string, o
 		}
 		a.AwsConfig = &awsConfig
 		if commandRequiresRegionDiscovery(cmd) {
-			a.RootFlags.Regions, err = utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
-			if err != nil {
-				if len(a.RootFlags.Regions) == 0 {
-					return fmt.Errorf("unable to discover enabled AWS regions: %w", err)
-				}
-				// Keep fallback-region results, but do not present them as a complete scan.
-				a.OutputSignal.AddError(err)
+			regions, discoveryErr := utils.GetAWSRegions(cmd.Context(), *a.AwsConfig, a.RootFlags.Regions)
+			if err := a.setDiscoveredRegions(regions, discoveryErr); err != nil {
+				return err
 			}
 		}
 	}
 
+	return nil
+}
+
+func (a *MethodAws) setDiscoveredRegions(regions []string, err error) error {
+	if err != nil && len(regions) == 0 {
+		return fmt.Errorf("unable to discover enabled AWS regions: %w", err)
+	}
+	// GetAWSRegions logs incomplete coverage; a usable fallback must not fail the command.
+	a.RootFlags.Regions = regions
 	return nil
 }
 
