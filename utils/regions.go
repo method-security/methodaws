@@ -3,6 +3,8 @@ package utils
 import (
 	// Standard
 	"context"
+	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +20,9 @@ import (
 	_ "github.com/palantir/witchcraft-go-logging/wlog-zap"
 	"github.com/palantir/witchcraft-go-logging/wlog/svclog/svc1log"
 )
+
+//go:embed config/fallback_regions.json
+var fallbackRegionsConfig embed.FS
 
 func GetAWSRegions(ctx context.Context, cfg aws.Config, selectedRegions []string) ([]string, error) {
 	logger := svc1log.New(os.Stderr, wlog.InfoLevel)
@@ -72,14 +77,38 @@ func regionDiscoveryFallback(configRegion string, selectedRegions []string, disc
 	if len(selectedRegions) > 0 {
 		return selectedRegions, nil
 	}
+	partition := "aws"
 	if configRegion != "" {
-		regions, err := NormalizeSelectedRegions([]string{configRegion})
+		var err error
+		partition, err = awsPartitionForRegion(configRegion)
 		if err != nil {
 			return nil, fmt.Errorf("describe enabled AWS regions: %w; configured region is invalid: %v", discoveryErr, err)
 		}
-		return regions, nil
 	}
-	return nil, discoveryErr
+
+	contents, err := fallbackRegionsConfig.ReadFile("config/fallback_regions.json")
+	if err != nil {
+		return nil, fmt.Errorf("read AWS region fallback config: %w", err)
+	}
+	var configured map[string][]string
+	if err := json.Unmarshal(contents, &configured); err != nil {
+		return nil, fmt.Errorf("parse AWS region fallback config: %w", err)
+	}
+
+	regions := append([]string(nil), configured[partition]...)
+	for _, region := range regions {
+		regionPartition, err := awsPartitionForRegion(region)
+		if err != nil || regionPartition != partition {
+			return nil, fmt.Errorf("AWS region fallback config contains invalid region %q for partition %q", region, partition)
+		}
+	}
+	if configRegion != "" {
+		regions = append(regions, configRegion)
+	}
+	if len(regions) == 0 {
+		return nil, fmt.Errorf("describe enabled AWS regions: %w; no fallback regions for partition %q", discoveryErr, partition)
+	}
+	return NormalizeSelectedRegions(regions)
 }
 
 func regionDiscoveryQueryRegion(configRegion string, selectedRegions []string) (string, error) {
