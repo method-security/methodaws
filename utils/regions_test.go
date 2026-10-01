@@ -23,10 +23,21 @@ func TestGetAWSRegionsPreservesFallbackWithCoverageError(t *testing.T) {
 	cfg := aws.Config{Region: "us-east-1", Credentials: aws.AnonymousCredentials{}, HTTPClient: unavailableRegionDiscovery{}, RetryMaxAttempts: 1}
 	regions, err := GetAWSRegions(context.Background(), cfg, nil)
 	require.ErrorContains(t, err, "coverage is incomplete")
-	assert.Equal(t, []string{"us-east-1"}, regions)
+	assert.Len(t, regions, 17)
+	assert.Contains(t, regions, "us-east-1")
+	assert.Contains(t, regions, "us-west-2")
 	regions, err = GetAWSRegions(context.Background(), cfg, []string{"us-west-2"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"us-west-2"}, regions)
+}
+
+func TestGetAWSRegionsUsesDefaultListWhenConfiguredRegionDiscoveryFails(t *testing.T) {
+	cfg := aws.Config{Region: "us-east-2", Credentials: aws.AnonymousCredentials{}, HTTPClient: unavailableRegionDiscovery{}, RetryMaxAttempts: 1}
+	regions, err := GetAWSRegions(context.Background(), cfg, nil)
+	require.ErrorContains(t, err, "coverage is incomplete")
+	assert.Len(t, regions, 17)
+	assert.Contains(t, regions, "us-east-2")
+	assert.Contains(t, regions, "us-west-2")
 }
 
 type stubDescribeRegionsClient struct {
@@ -121,8 +132,23 @@ func TestRegionDiscoveryFallback(t *testing.T) {
 
 	regions, err = regionDiscoveryFallback("us-gov-west-1", nil, discoveryErr)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"us-gov-west-1"}, regions)
+	assert.Equal(t, []string{"us-gov-east-1", "us-gov-west-1"}, regions)
 
-	_, err = regionDiscoveryFallback("", nil, discoveryErr)
-	require.ErrorIs(t, err, discoveryErr)
+	regions, err = regionDiscoveryFallback("", nil, discoveryErr)
+	require.NoError(t, err)
+	assert.Len(t, regions, 17)
+	assert.Contains(t, regions, "us-east-2")
+
+	regions, err = regionDiscoveryFallback("af-south-1", nil, discoveryErr)
+	require.NoError(t, err)
+	assert.Len(t, regions, 18)
+	assert.Contains(t, regions, "af-south-1")
+
+	regions, err = regionDiscoveryFallback("cn-north-1", nil, discoveryErr)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"cn-north-1", "cn-northwest-1"}, regions)
+
+	regions, err = regionDiscoveryFallback("us-iso-east-1", nil, discoveryErr)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"us-iso-east-1"}, regions)
 }
