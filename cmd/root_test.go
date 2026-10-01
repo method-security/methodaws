@@ -27,15 +27,19 @@ func TestConfigForSingleRegion(t *testing.T) {
 	assert.Equal(t, base.Region, cfg.Region)
 }
 
-func TestSetReportRetainsRegionCoverageError(t *testing.T) {
+func TestRegionFallbackDoesNotFailSignal(t *testing.T) {
 	t.Parallel()
 	app := NewMethodAws("test")
-	app.OutputSignal.AddError(errors.New("region coverage incomplete"))
+	err := app.setDiscoveredRegions([]string{"us-east-1", "us-west-2"}, errors.New("region coverage incomplete"))
+	require.NoError(t, err)
 	app.setReport("partial inventory")
+	assert.Equal(t, []string{"us-east-1", "us-west-2"}, app.RootFlags.Regions)
 	assert.Equal(t, "partial inventory", app.OutputSignal.Content)
-	assert.Equal(t, 1, app.OutputSignal.Status)
-	require.NotNil(t, app.OutputSignal.ErrorMessage)
-	assert.Contains(t, *app.OutputSignal.ErrorMessage, "region coverage incomplete")
+	assert.Equal(t, 0, app.OutputSignal.Status)
+	assert.Nil(t, app.OutputSignal.ErrorMessage)
+
+	err = app.setDiscoveredRegions(nil, errors.New("region discovery unavailable"))
+	require.ErrorContains(t, err, "unable to discover enabled AWS regions")
 }
 
 func TestSetReportPreservesPartialContentWithoutFailingSignal(t *testing.T) {
