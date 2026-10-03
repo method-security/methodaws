@@ -183,7 +183,7 @@ func enumerateBySeed(ctx context.Context, config s3fern.S3ExternalConfig) (*s3fe
 			if len(config.Regions) > 0 && !containsString(config.Regions, bucketRegion) {
 				break
 			}
-			functionResult, functionErrors := externalS3Region(ctx, name, bucketRegion)
+			functionResult, functionErrors := externalS3Region(ctx, "", name, bucketRegion)
 			if functionResult != nil {
 				result.ExternalBuckets = append(result.ExternalBuckets, functionResult.ExternalBuckets...)
 			}

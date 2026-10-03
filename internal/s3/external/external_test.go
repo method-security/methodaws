@@ -139,3 +139,45 @@ func TestExternalPolicyAndACLHandleMissingResponses(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, client.policy.Policy, policy)
 }
+
+func TestBucketURLForReportPreservesInputURL(t *testing.T) {
+	t.Parallel()
+
+	inputURL := "https://d-port.communication-base.com:443"
+	actual, err := bucketURLForReport(inputURL, "d-port.communication-base.com", "ap-northeast-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, inputURL, actual)
+}
+
+func TestBucketURLForReportBuildsCanonicalURLForDiscoveredBucket(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		bucketName string
+		expected   string
+	}{
+		{
+			name:       "virtual hosted style",
+			bucketName: "example-bucket",
+			expected:   "https://example-bucket.s3.ap-northeast-1.amazonaws.com",
+		},
+		{
+			name:       "virtual hosted style for dotted bucket",
+			bucketName: "d-port.communication-base.com",
+			expected:   "https://d-port.communication-base.com.s3.ap-northeast-1.amazonaws.com",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			actual, err := bucketURLForReport("", test.bucketName, "ap-northeast-1")
+
+			require.NoError(t, err)
+			assert.Equal(t, test.expected, actual)
+		})
+	}
+}
