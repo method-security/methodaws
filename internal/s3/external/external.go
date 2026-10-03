@@ -340,8 +340,23 @@ func processS3ACLGrants(grants []types.Grant) []*s3fern.S3BucketAccessControl {
 	return acls
 }
 
-// EnumerateS3Region enumerates a single public facing S3 bucket in a specific region
-func externalS3Region(ctx context.Context, bucketName string, region string) (*s3fern.ExternalS3BucketResult, []string) {
+func bucketURLForReport(inputURL string, bucketName string, region string) (string, error) {
+	if inputURL != "" {
+		return inputURL, nil
+	}
+
+	dnsSuffix, err := utils.AWSDNSSuffixForRegion(region)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("https://%s.s3.%s.%s", bucketName, region, dnsSuffix), nil
+}
+
+// EnumerateS3Region enumerates a single public facing S3 bucket in a specific region.
+// URL-based enumeration preserves the caller's URL; seed-based discovery passes an
+// empty URL and receives a canonical S3 endpoint for the discovered bucket.
+func externalS3Region(ctx context.Context, inputURL string, bucketName string, region string) (*s3fern.ExternalS3BucketResult, []string) {
 	log := svc1log.FromContext(ctx)
 	log.Info("Starting external S3 bucket enumeration",
 		svc1log.SafeParam("bucketName", bucketName),
@@ -355,13 +370,9 @@ func externalS3Region(ctx context.Context, bucketName string, region string) (*s
 	if err != nil {
 		return nil, []string{err.Error()}
 	}
-	dnsSuffix, err := utils.AWSDNSSuffixForRegion(region)
+	bucketURL, err := bucketURLForReport(inputURL, bucketName, region)
 	if err != nil {
 		return nil, []string{err.Error()}
-	}
-	bucketURL := fmt.Sprintf("https://%s.s3.%s.%s", bucketName, region, dnsSuffix)
-	if strings.ContainsAny(bucketName, "._") || bucketName != strings.ToLower(bucketName) {
-		bucketURL = fmt.Sprintf("https://s3.%s.%s/%s", region, dnsSuffix, bucketName)
 	}
 
 	externalBucket := s3fern.ExternalBucket{
@@ -526,7 +537,7 @@ func EnumerateS3(ctx context.Context, config s3fern.S3ExternalConfig) s3fern.Ext
 			log.Info("Found bucket in region",
 				svc1log.SafeParam("bucketName", bucketName),
 				svc1log.SafeParam("region", bucketRegion))
-			functionResult, functionErrors := externalS3Region(ctx, bucketName, bucketRegion)
+			functionResult, functionErrors := externalS3Region(ctx, bucketURL, bucketName, bucketRegion)
 			if functionResult != nil {
 				result = *functionResult
 			}
