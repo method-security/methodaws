@@ -14,6 +14,8 @@ on:
 
 env:
   GO_VERSION: "1.26"
+  # Fern Definition inputs still require the legacy generation backend.
+  FERN_USE_SDK_GEN_API: "false"
 
 jobs:
   # Build ARM64 using native GitHub ARM runner but inside Docker for Alpine compatibility
