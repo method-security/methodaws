@@ -68,6 +68,16 @@ jobs:
             goreleaser build --single-target --timeout 60m \
             -f .goreleaser/goreleaser-build.yml ${{ inputs.goreleaser_options }}
 
+      - name: Verify portable ARM64 binary
+        run: |
+          binary="$(find dist -type f -name methodaws -print -quit)"
+          test -n "$binary"
+          file "$binary" | grep -F "statically linked"
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user 65532:65532 \
+            --mount "type=bind,src=$PWD/$binary,dst=/methodaws,readonly" \
+            cgr.dev/chainguard/wolfi-base:latest /methodaws s3 external --help
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
         with:
           name: linux-arm64-dist
