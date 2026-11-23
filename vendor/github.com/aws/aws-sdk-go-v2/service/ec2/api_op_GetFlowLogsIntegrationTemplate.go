@@ -24,7 +24,8 @@ import (
 //     quickly
 //
 // GetFlowLogsIntegrationTemplate does not support integration between Amazon Web
-// Services Transit Gateway Flow Logs and Amazon Athena.
+// Services Transit Gateway Flow Logs or Amazon Web Services Cloud WAN Flow Logs
+// and Amazon Athena.
 func (c *Client) GetFlowLogsIntegrationTemplate(ctx context.Context, params *GetFlowLogsIntegrationTemplateInput, optFns ...func(*Options)) (*GetFlowLogsIntegrationTemplateOutput, error) {
 	if params == nil {
 		params = &GetFlowLogsIntegrationTemplateInput{}
@@ -88,9 +89,6 @@ func (c *Client) addOperationGetFlowLogsIntegrationTemplateMiddlewares(stack *mi
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

@@ -33,6 +33,10 @@ func (c *Client) ModifyAccountVpcEncryptionControl(ctx context.Context, params *
 
 type ModifyAccountVpcEncryptionControlInput struct {
 
+	// Specifies whether to exclude Amazon API Gateway V2 from account-level
+	// encryption enforcement.
+	ApiGatewayV2 types.VpcEncryptionControlExclusionStateInput
+
 	// Checks whether you have the required permissions for the action, without
 	// actually making the request, and provides an error response. If you have the
 	// required permissions, the error response is DryRunOperation . Otherwise, it is
@@ -46,6 +50,10 @@ type ModifyAccountVpcEncryptionControlInput struct {
 	// Specifies whether to exclude Elastic File System service from account-level
 	// encryption enforcement.
 	ElasticFileSystem types.VpcEncryptionControlExclusionStateInput
+
+	// Specifies whether to exclude Amazon Web Services Global Accelerator from
+	// account-level encryption enforcement.
+	GlobalAccelerator types.VpcEncryptionControlExclusionStateInput
 
 	// Specifies whether to exclude internet gateway resource from account-level
 	// encryption enforcement.
@@ -98,9 +106,6 @@ func (c *Client) addOperationModifyAccountVpcEncryptionControlMiddlewares(stack 
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

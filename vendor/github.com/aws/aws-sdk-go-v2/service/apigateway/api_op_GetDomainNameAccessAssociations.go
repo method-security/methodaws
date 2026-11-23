@@ -4,7 +4,9 @@ package apigateway
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go-v2/service/apigateway/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/apigateway/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
 )
 
@@ -36,10 +38,28 @@ type GetDomainNameAccessAssociationsInput struct {
 	//  The owner of the domain name access association. Use SELF to only list the
 	// domain name access associations owned by your own account. Use OTHER_ACCOUNTS
 	// to list the domain name access associations with your private custom domain
-	// names that are owned by other AWS accounts.
+	// names that are owned by other Amazon Web Services accounts.
 	ResourceOwner types.ResourceOwner
 
 	noSmithyDocumentSerde
+}
+
+func (v *GetDomainNameAccessAssociationsInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.GetDomainNameAccessAssociationsRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *GetDomainNameAccessAssociationsInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.Limit != nil {
+		s.WriteInt32(schemas.GetDomainNameAccessAssociationsRequest_limit, *v.Limit)
+	}
+	if v.Position != nil {
+		s.WriteString(schemas.GetDomainNameAccessAssociationsRequest_position, *v.Position)
+	}
+	if v.ResourceOwner != "" {
+		s.WriteString(schemas.GetDomainNameAccessAssociationsRequest_resourceOwner, string(v.ResourceOwner))
+	}
 }
 
 type GetDomainNameAccessAssociationsOutput struct {
@@ -56,19 +76,40 @@ type GetDomainNameAccessAssociationsOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *GetDomainNameAccessAssociationsOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.DomainNameAccessAssociations)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *GetDomainNameAccessAssociationsOutput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.Items != nil {
+		serializeListOfDomainNameAccessAssociation(s, schemas.DomainNameAccessAssociations_items, v.Items)
+	}
+	if v.Position != nil {
+		s.WriteString(schemas.DomainNameAccessAssociations_position, *v.Position)
+	}
+}
+func (v *GetDomainNameAccessAssociationsOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.DomainNameAccessAssociations, func(s *smithy.Schema) error {
+		switch s {
+		case schemas.DomainNameAccessAssociations_items:
+			return deserializeListOfDomainNameAccessAssociation(d, schemas.DomainNameAccessAssociations_items, &v.Items)
+		case schemas.DomainNameAccessAssociations_position:
+			v.Position = new(string)
+			return d.ReadString(schemas.DomainNameAccessAssociations_position, v.Position)
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationGetDomainNameAccessAssociationsMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	err = stack.Serialize.Add(&awsRestjson1_serializeOpGetDomainNameAccessAssociations{}, middleware.After)
-	if err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.GetDomainNameAccessAssociations, schemas.GetDomainNameAccessAssociationsRequest, schemas.DomainNameAccessAssociations)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Deserialize.Add(&awsRestjson1_deserializeOpGetDomainNameAccessAssociations{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.GetDomainNameAccessAssociations, schemas.GetDomainNameAccessAssociationsRequest, schemas.DomainNameAccessAssociations), output: &GetDomainNameAccessAssociationsOutput{}}, middleware.After); err != nil {
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

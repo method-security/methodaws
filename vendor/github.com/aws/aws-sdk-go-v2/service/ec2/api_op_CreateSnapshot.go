@@ -114,6 +114,9 @@ type CreateSnapshotInput struct {
 // Describes a snapshot.
 type CreateSnapshotOutput struct {
 
+	// The additional KMS keys that are associated with the snapshot.
+	AssociatedKmsKeys []types.AssociatedKmsKey
+
 	// The Availability Zone or Local Zone of the snapshot. For example, us-west-1a
 	// (Availability Zone) or us-west-2-lax-1a (Local Zone).
 	AvailabilityZone *string
@@ -238,9 +241,6 @@ func (c *Client) addOperationCreateSnapshotMiddlewares(stack *middleware.Stack, 
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

@@ -85,6 +85,7 @@ const (
 	AuthorizerTypeToken            AuthorizerType = "TOKEN"
 	AuthorizerTypeRequest          AuthorizerType = "REQUEST"
 	AuthorizerTypeCognitoUserPools AuthorizerType = "COGNITO_USER_POOLS"
+	AuthorizerTypeJwt              AuthorizerType = "JWT"
 )
 
 // Values returns all known values for AuthorizerType. Note that this can be
@@ -96,6 +97,7 @@ func (AuthorizerType) Values() []AuthorizerType {
 		"TOKEN",
 		"REQUEST",
 		"COGNITO_USER_POOLS",
+		"JWT",
 	}
 }
 
@@ -400,6 +402,50 @@ func (IpAddressType) Values() []IpAddressType {
 	}
 }
 
+type JwtClaimFormat string
+
+// Enum values for JwtClaimFormat
+const (
+	JwtClaimFormatSingleString JwtClaimFormat = "SINGLE_STRING"
+)
+
+// Values returns all known values for JwtClaimFormat. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (JwtClaimFormat) Values() []JwtClaimFormat {
+	return []JwtClaimFormat{
+		"SINGLE_STRING",
+	}
+}
+
+type JwtSigningAlgorithm string
+
+// Enum values for JwtSigningAlgorithm
+const (
+	JwtSigningAlgorithmRs256 JwtSigningAlgorithm = "RS256"
+	JwtSigningAlgorithmRs384 JwtSigningAlgorithm = "RS384"
+	JwtSigningAlgorithmRs512 JwtSigningAlgorithm = "RS512"
+	JwtSigningAlgorithmEs256 JwtSigningAlgorithm = "ES256"
+	JwtSigningAlgorithmEs384 JwtSigningAlgorithm = "ES384"
+	JwtSigningAlgorithmEs512 JwtSigningAlgorithm = "ES512"
+)
+
+// Values returns all known values for JwtSigningAlgorithm. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (JwtSigningAlgorithm) Values() []JwtSigningAlgorithm {
+	return []JwtSigningAlgorithm{
+		"RS256",
+		"RS384",
+		"RS512",
+		"ES256",
+		"ES384",
+		"ES512",
+	}
+}
+
 type LocationStatusType string
 
 // Enum values for LocationStatusType
@@ -549,18 +595,20 @@ type SecurityPolicy string
 
 // Enum values for SecurityPolicy
 const (
-	SecurityPolicyTls10                                SecurityPolicy = "TLS_1_0"
-	SecurityPolicyTls12                                SecurityPolicy = "TLS_1_2"
-	SecurityPolicySecurityPolicyTls1313202509          SecurityPolicy = "SecurityPolicy_TLS13_1_3_2025_09"
-	SecurityPolicySecurityPolicyTls1313Fips202509      SecurityPolicy = "SecurityPolicy_TLS13_1_3_FIPS_2025_09"
-	SecurityPolicySecurityPolicyTls1312PfsPq202509     SecurityPolicy = "SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09"
-	SecurityPolicySecurityPolicyTls1312FipsPq202509    SecurityPolicy = "SecurityPolicy_TLS13_1_2_FIPS_PQ_2025_09"
-	SecurityPolicySecurityPolicyTls1312FipsPfsPq202509 SecurityPolicy = "SecurityPolicy_TLS13_1_2_FIPS_PFS_PQ_2025_09"
-	SecurityPolicySecurityPolicyTls1312Pq202509        SecurityPolicy = "SecurityPolicy_TLS13_1_2_PQ_2025_09"
-	SecurityPolicySecurityPolicyTls1312202106          SecurityPolicy = "SecurityPolicy_TLS13_1_2_2021_06"
-	SecurityPolicySecurityPolicyTls132025Edge          SecurityPolicy = "SecurityPolicy_TLS13_2025_EDGE"
-	SecurityPolicySecurityPolicyTls12Pfs2025Edge       SecurityPolicy = "SecurityPolicy_TLS12_PFS_2025_EDGE"
-	SecurityPolicySecurityPolicyTls122018Edge          SecurityPolicy = "SecurityPolicy_TLS12_2018_EDGE"
+	SecurityPolicyTls10                                 SecurityPolicy = "TLS_1_0"
+	SecurityPolicyTls12                                 SecurityPolicy = "TLS_1_2"
+	SecurityPolicySecurityPolicyTls1313202509           SecurityPolicy = "SecurityPolicy_TLS13_1_3_2025_09"
+	SecurityPolicySecurityPolicyTls1313Fips202509       SecurityPolicy = "SecurityPolicy_TLS13_1_3_FIPS_2025_09"
+	SecurityPolicySecurityPolicyTls1312PfsPq202509      SecurityPolicy = "SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09"
+	SecurityPolicySecurityPolicyTls1312FipsPq202509     SecurityPolicy = "SecurityPolicy_TLS13_1_2_FIPS_PQ_2025_09"
+	SecurityPolicySecurityPolicyTls1312FipsPfsPq202509  SecurityPolicy = "SecurityPolicy_TLS13_1_2_FIPS_PFS_PQ_2025_09"
+	SecurityPolicySecurityPolicyTls1312Ext2Pq202509     SecurityPolicy = "SecurityPolicy_TLS13_1_2_Ext2_PQ_2025_09"
+	SecurityPolicySecurityPolicyTls1312Ext2FipsPq202509 SecurityPolicy = "SecurityPolicy_TLS13_1_2_Ext2_FIPS_PQ_2025_09"
+	SecurityPolicySecurityPolicyTls1312Pq202509         SecurityPolicy = "SecurityPolicy_TLS13_1_2_PQ_2025_09"
+	SecurityPolicySecurityPolicyTls1312202106           SecurityPolicy = "SecurityPolicy_TLS13_1_2_2021_06"
+	SecurityPolicySecurityPolicyTls132025Edge           SecurityPolicy = "SecurityPolicy_TLS13_2025_EDGE"
+	SecurityPolicySecurityPolicyTls12Pfs2025Edge        SecurityPolicy = "SecurityPolicy_TLS12_PFS_2025_EDGE"
+	SecurityPolicySecurityPolicyTls122018Edge           SecurityPolicy = "SecurityPolicy_TLS12_2018_EDGE"
 )
 
 // Values returns all known values for SecurityPolicy. Note that this can be
@@ -576,6 +624,8 @@ func (SecurityPolicy) Values() []SecurityPolicy {
 		"SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09",
 		"SecurityPolicy_TLS13_1_2_FIPS_PQ_2025_09",
 		"SecurityPolicy_TLS13_1_2_FIPS_PFS_PQ_2025_09",
+		"SecurityPolicy_TLS13_1_2_Ext2_PQ_2025_09",
+		"SecurityPolicy_TLS13_1_2_Ext2_FIPS_PQ_2025_09",
 		"SecurityPolicy_TLS13_1_2_PQ_2025_09",
 		"SecurityPolicy_TLS13_1_2_2021_06",
 		"SecurityPolicy_TLS13_2025_EDGE",

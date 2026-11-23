@@ -31,16 +31,36 @@ func (ActionValue) Values() []ActionValue {
 	}
 }
 
+type AnalyticsMode string
+
+// Enum values for AnalyticsMode
+const (
+	AnalyticsModeCrossRegion AnalyticsMode = "CROSS_REGION"
+	AnalyticsModeDisabled    AnalyticsMode = "DISABLED"
+)
+
+// Values returns all known values for AnalyticsMode. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (AnalyticsMode) Values() []AnalyticsMode {
+	return []AnalyticsMode{
+		"CROSS_REGION",
+		"DISABLED",
+	}
+}
+
 type AssociatedResourceType string
 
 // Enum values for AssociatedResourceType
 const (
-	AssociatedResourceTypeCloudfront             AssociatedResourceType = "CLOUDFRONT"
-	AssociatedResourceTypeApiGateway             AssociatedResourceType = "API_GATEWAY"
-	AssociatedResourceTypeCognitoUserPool        AssociatedResourceType = "COGNITO_USER_POOL"
-	AssociatedResourceTypeAppRunnerService       AssociatedResourceType = "APP_RUNNER_SERVICE"
-	AssociatedResourceTypeVerifiedAccessInstance AssociatedResourceType = "VERIFIED_ACCESS_INSTANCE"
-	AssociatedResourceTypeAgentcoreGateway       AssociatedResourceType = "AGENTCORE_GATEWAY"
+	AssociatedResourceTypeCloudfront              AssociatedResourceType = "CLOUDFRONT"
+	AssociatedResourceTypeApiGateway              AssociatedResourceType = "API_GATEWAY"
+	AssociatedResourceTypeCognitoUserPool         AssociatedResourceType = "COGNITO_USER_POOL"
+	AssociatedResourceTypeAppRunnerService        AssociatedResourceType = "APP_RUNNER_SERVICE"
+	AssociatedResourceTypeVerifiedAccessInstance  AssociatedResourceType = "VERIFIED_ACCESS_INSTANCE"
+	AssociatedResourceTypeAgentcoreGateway        AssociatedResourceType = "AGENTCORE_GATEWAY"
+	AssociatedResourceTypeApplicationLoadBalancer AssociatedResourceType = "APPLICATION_LOAD_BALANCER"
 )
 
 // Values returns all known values for AssociatedResourceType. Note that this can
@@ -55,6 +75,7 @@ func (AssociatedResourceType) Values() []AssociatedResourceType {
 		"APP_RUNNER_SERVICE",
 		"VERIFIED_ACCESS_INSTANCE",
 		"AGENTCORE_GATEWAY",
+		"APPLICATION_LOAD_BALANCER",
 	}
 }
 
@@ -126,6 +147,46 @@ func (ComparisonOperator) Values() []ComparisonOperator {
 		"LT",
 		"GE",
 		"GT",
+	}
+}
+
+type Confidence string
+
+// Enum values for Confidence
+const (
+	ConfidenceLow    Confidence = "LOW"
+	ConfidenceMedium Confidence = "MEDIUM"
+	ConfidenceHigh   Confidence = "HIGH"
+)
+
+// Values returns all known values for Confidence. Note that this can be expanded
+// in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (Confidence) Values() []Confidence {
+	return []Confidence{
+		"LOW",
+		"MEDIUM",
+		"HIGH",
+	}
+}
+
+type ConnectedAccountChain string
+
+// Enum values for ConnectedAccountChain
+const (
+	ConnectedAccountChainBase   ConnectedAccountChain = "BASE"
+	ConnectedAccountChainSolana ConnectedAccountChain = "SOLANA"
+)
+
+// Values returns all known values for ConnectedAccountChain. Note that this can
+// be expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (ConnectedAccountChain) Values() []ConnectedAccountChain {
+	return []ConnectedAccountChain{
+		"BASE",
+		"SOLANA",
 	}
 }
 
@@ -716,6 +777,120 @@ func (DataProtectionAction) Values() []DataProtectionAction {
 	}
 }
 
+type EventActorSortBy string
+
+// Enum values for EventActorSortBy
+const (
+	EventActorSortByEventCount EventActorSortBy = "EVENT_COUNT"
+)
+
+// Values returns all known values for EventActorSortBy. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (EventActorSortBy) Values() []EventActorSortBy {
+	return []EventActorSortBy{
+		"EVENT_COUNT",
+	}
+}
+
+type EventCategory string
+
+// Enum values for EventCategory
+const (
+	EventCategoryApiSecurity EventCategory = "API_SECURITY"
+)
+
+// Values returns all known values for EventCategory. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (EventCategory) Values() []EventCategory {
+	return []EventCategory{
+		"API_SECURITY",
+	}
+}
+
+type EventFilterKey string
+
+// Enum values for EventFilterKey
+const (
+	EventFilterKeyEventCategory EventFilterKey = "EVENT_CATEGORY"
+	EventFilterKeyResourceArn   EventFilterKey = "RESOURCE_ARN"
+)
+
+// Values returns all known values for EventFilterKey. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (EventFilterKey) Values() []EventFilterKey {
+	return []EventFilterKey{
+		"EVENT_CATEGORY",
+		"RESOURCE_ARN",
+	}
+}
+
+type EventIncludeField string
+
+// Enum values for EventIncludeField
+const (
+	EventIncludeFieldTimeline EventIncludeField = "TIMELINE"
+)
+
+// Values returns all known values for EventIncludeField. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (EventIncludeField) Values() []EventIncludeField {
+	return []EventIncludeField{
+		"TIMELINE",
+	}
+}
+
+type EventSortBy string
+
+// Enum values for EventSortBy
+const (
+	EventSortByStartTime  EventSortBy = "START_TIME"
+	EventSortByEndTime    EventSortBy = "END_TIME"
+	EventSortByConfidence EventSortBy = "CONFIDENCE"
+)
+
+// Values returns all known values for EventSortBy. Note that this can be expanded
+// in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (EventSortBy) Values() []EventSortBy {
+	return []EventSortBy{
+		"START_TIME",
+		"END_TIME",
+		"CONFIDENCE",
+	}
+}
+
+type EventStatus string
+
+// Enum values for EventStatus
+const (
+	EventStatusEventStarted    EventStatus = "EVENT_STARTED"
+	EventStatusEventInProgress EventStatus = "EVENT_IN_PROGRESS"
+	EventStatusEventCompleted  EventStatus = "EVENT_COMPLETED"
+	EventStatusEventEnded      EventStatus = "EVENT_ENDED"
+)
+
+// Values returns all known values for EventStatus. Note that this can be expanded
+// in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (EventStatus) Values() []EventStatus {
+	return []EventStatus{
+		"EVENT_STARTED",
+		"EVENT_IN_PROGRESS",
+		"EVENT_COMPLETED",
+		"EVENT_ENDED",
+	}
+}
+
 type FailureReason string
 
 // Enum values for FailureReason
@@ -1071,83 +1246,86 @@ type ParameterExceptionField string
 
 // Enum values for ParameterExceptionField
 const (
-	ParameterExceptionFieldWebAcl                         ParameterExceptionField = "WEB_ACL"
-	ParameterExceptionFieldRuleGroup                      ParameterExceptionField = "RULE_GROUP"
-	ParameterExceptionFieldRegexPatternSet                ParameterExceptionField = "REGEX_PATTERN_SET"
-	ParameterExceptionFieldIpSet                          ParameterExceptionField = "IP_SET"
-	ParameterExceptionFieldManagedRuleSet                 ParameterExceptionField = "MANAGED_RULE_SET"
-	ParameterExceptionFieldRule                           ParameterExceptionField = "RULE"
-	ParameterExceptionFieldExcludedRule                   ParameterExceptionField = "EXCLUDED_RULE"
-	ParameterExceptionFieldStatement                      ParameterExceptionField = "STATEMENT"
-	ParameterExceptionFieldByteMatchStatement             ParameterExceptionField = "BYTE_MATCH_STATEMENT"
-	ParameterExceptionFieldSqliMatchStatement             ParameterExceptionField = "SQLI_MATCH_STATEMENT"
-	ParameterExceptionFieldXssMatchStatement              ParameterExceptionField = "XSS_MATCH_STATEMENT"
-	ParameterExceptionFieldSizeConstraintStatement        ParameterExceptionField = "SIZE_CONSTRAINT_STATEMENT"
-	ParameterExceptionFieldGeoMatchStatement              ParameterExceptionField = "GEO_MATCH_STATEMENT"
-	ParameterExceptionFieldRateBasedStatement             ParameterExceptionField = "RATE_BASED_STATEMENT"
-	ParameterExceptionFieldRuleGroupReferenceStatement    ParameterExceptionField = "RULE_GROUP_REFERENCE_STATEMENT"
-	ParameterExceptionFieldRegexPatternReferenceStatement ParameterExceptionField = "REGEX_PATTERN_REFERENCE_STATEMENT"
-	ParameterExceptionFieldIpSetReferenceStatement        ParameterExceptionField = "IP_SET_REFERENCE_STATEMENT"
-	ParameterExceptionFieldManagedRuleSetStatement        ParameterExceptionField = "MANAGED_RULE_SET_STATEMENT"
-	ParameterExceptionFieldLabelMatchStatement            ParameterExceptionField = "LABEL_MATCH_STATEMENT"
-	ParameterExceptionFieldAndStatement                   ParameterExceptionField = "AND_STATEMENT"
-	ParameterExceptionFieldOrStatement                    ParameterExceptionField = "OR_STATEMENT"
-	ParameterExceptionFieldNotStatement                   ParameterExceptionField = "NOT_STATEMENT"
-	ParameterExceptionFieldIpAddress                      ParameterExceptionField = "IP_ADDRESS"
-	ParameterExceptionFieldIpAddressVersion               ParameterExceptionField = "IP_ADDRESS_VERSION"
-	ParameterExceptionFieldFieldToMatch                   ParameterExceptionField = "FIELD_TO_MATCH"
-	ParameterExceptionFieldTextTransformation             ParameterExceptionField = "TEXT_TRANSFORMATION"
-	ParameterExceptionFieldSingleQueryArgument            ParameterExceptionField = "SINGLE_QUERY_ARGUMENT"
-	ParameterExceptionFieldSingleHeader                   ParameterExceptionField = "SINGLE_HEADER"
-	ParameterExceptionFieldDefaultAction                  ParameterExceptionField = "DEFAULT_ACTION"
-	ParameterExceptionFieldRuleAction                     ParameterExceptionField = "RULE_ACTION"
-	ParameterExceptionFieldEntityLimit                    ParameterExceptionField = "ENTITY_LIMIT"
-	ParameterExceptionFieldOverrideAction                 ParameterExceptionField = "OVERRIDE_ACTION"
-	ParameterExceptionFieldScopeValue                     ParameterExceptionField = "SCOPE_VALUE"
-	ParameterExceptionFieldResourceArn                    ParameterExceptionField = "RESOURCE_ARN"
-	ParameterExceptionFieldResourceType                   ParameterExceptionField = "RESOURCE_TYPE"
-	ParameterExceptionFieldTags                           ParameterExceptionField = "TAGS"
-	ParameterExceptionFieldTagKeys                        ParameterExceptionField = "TAG_KEYS"
-	ParameterExceptionFieldMetricName                     ParameterExceptionField = "METRIC_NAME"
-	ParameterExceptionFieldFirewallManagerStatement       ParameterExceptionField = "FIREWALL_MANAGER_STATEMENT"
-	ParameterExceptionFieldFallbackBehavior               ParameterExceptionField = "FALLBACK_BEHAVIOR"
-	ParameterExceptionFieldPosition                       ParameterExceptionField = "POSITION"
-	ParameterExceptionFieldForwardedIpConfig              ParameterExceptionField = "FORWARDED_IP_CONFIG"
-	ParameterExceptionFieldIpSetForwardedIpConfig         ParameterExceptionField = "IP_SET_FORWARDED_IP_CONFIG"
-	ParameterExceptionFieldHeaderName                     ParameterExceptionField = "HEADER_NAME"
-	ParameterExceptionFieldCustomRequestHandling          ParameterExceptionField = "CUSTOM_REQUEST_HANDLING"
-	ParameterExceptionFieldResponseContentType            ParameterExceptionField = "RESPONSE_CONTENT_TYPE"
-	ParameterExceptionFieldCustomResponse                 ParameterExceptionField = "CUSTOM_RESPONSE"
-	ParameterExceptionFieldCustomResponseBody             ParameterExceptionField = "CUSTOM_RESPONSE_BODY"
-	ParameterExceptionFieldJsonMatchPattern               ParameterExceptionField = "JSON_MATCH_PATTERN"
-	ParameterExceptionFieldJsonMatchScope                 ParameterExceptionField = "JSON_MATCH_SCOPE"
-	ParameterExceptionFieldBodyParsingFallbackBehavior    ParameterExceptionField = "BODY_PARSING_FALLBACK_BEHAVIOR"
-	ParameterExceptionFieldLoggingFilter                  ParameterExceptionField = "LOGGING_FILTER"
-	ParameterExceptionFieldFilterCondition                ParameterExceptionField = "FILTER_CONDITION"
-	ParameterExceptionFieldExpireTimestamp                ParameterExceptionField = "EXPIRE_TIMESTAMP"
-	ParameterExceptionFieldChangePropagationStatus        ParameterExceptionField = "CHANGE_PROPAGATION_STATUS"
-	ParameterExceptionFieldAssociableResource             ParameterExceptionField = "ASSOCIABLE_RESOURCE"
-	ParameterExceptionFieldLogDestination                 ParameterExceptionField = "LOG_DESTINATION"
-	ParameterExceptionFieldManagedRuleGroupConfig         ParameterExceptionField = "MANAGED_RULE_GROUP_CONFIG"
-	ParameterExceptionFieldPayloadType                    ParameterExceptionField = "PAYLOAD_TYPE"
-	ParameterExceptionFieldHeaderMatchPattern             ParameterExceptionField = "HEADER_MATCH_PATTERN"
-	ParameterExceptionFieldCookieMatchPattern             ParameterExceptionField = "COOKIE_MATCH_PATTERN"
-	ParameterExceptionFieldMapMatchScope                  ParameterExceptionField = "MAP_MATCH_SCOPE"
-	ParameterExceptionFieldOversizeHandling               ParameterExceptionField = "OVERSIZE_HANDLING"
-	ParameterExceptionFieldChallengeConfig                ParameterExceptionField = "CHALLENGE_CONFIG"
-	ParameterExceptionFieldTokenDomain                    ParameterExceptionField = "TOKEN_DOMAIN"
-	ParameterExceptionFieldAtpRuleSetResponseInspection   ParameterExceptionField = "ATP_RULE_SET_RESPONSE_INSPECTION"
-	ParameterExceptionFieldAssociatedResourceType         ParameterExceptionField = "ASSOCIATED_RESOURCE_TYPE"
-	ParameterExceptionFieldScopeDown                      ParameterExceptionField = "SCOPE_DOWN"
-	ParameterExceptionFieldCustomKeys                     ParameterExceptionField = "CUSTOM_KEYS"
-	ParameterExceptionFieldAcpRuleSetResponseInspection   ParameterExceptionField = "ACP_RULE_SET_RESPONSE_INSPECTION"
-	ParameterExceptionFieldDataProtectionConfig           ParameterExceptionField = "DATA_PROTECTION_CONFIG"
-	ParameterExceptionFieldLowReputationMode              ParameterExceptionField = "LOW_REPUTATION_MODE"
-	ParameterExceptionFieldMonetizationConfig             ParameterExceptionField = "MONETIZATION_CONFIG"
-	ParameterExceptionFieldWalletAddress                  ParameterExceptionField = "WALLET_ADDRESS"
-	ParameterExceptionFieldPriceAmount                    ParameterExceptionField = "PRICE_AMOUNT"
-	ParameterExceptionFieldPaymentNetwork                 ParameterExceptionField = "PAYMENT_NETWORK"
-	ParameterExceptionFieldPreParseTextTransformation     ParameterExceptionField = "PRE_PARSE_TEXT_TRANSFORMATION"
+	ParameterExceptionFieldWebAcl                                ParameterExceptionField = "WEB_ACL"
+	ParameterExceptionFieldRuleGroup                             ParameterExceptionField = "RULE_GROUP"
+	ParameterExceptionFieldRegexPatternSet                       ParameterExceptionField = "REGEX_PATTERN_SET"
+	ParameterExceptionFieldIpSet                                 ParameterExceptionField = "IP_SET"
+	ParameterExceptionFieldManagedRuleSet                        ParameterExceptionField = "MANAGED_RULE_SET"
+	ParameterExceptionFieldRule                                  ParameterExceptionField = "RULE"
+	ParameterExceptionFieldExcludedRule                          ParameterExceptionField = "EXCLUDED_RULE"
+	ParameterExceptionFieldStatement                             ParameterExceptionField = "STATEMENT"
+	ParameterExceptionFieldByteMatchStatement                    ParameterExceptionField = "BYTE_MATCH_STATEMENT"
+	ParameterExceptionFieldSqliMatchStatement                    ParameterExceptionField = "SQLI_MATCH_STATEMENT"
+	ParameterExceptionFieldXssMatchStatement                     ParameterExceptionField = "XSS_MATCH_STATEMENT"
+	ParameterExceptionFieldSizeConstraintStatement               ParameterExceptionField = "SIZE_CONSTRAINT_STATEMENT"
+	ParameterExceptionFieldGeoMatchStatement                     ParameterExceptionField = "GEO_MATCH_STATEMENT"
+	ParameterExceptionFieldRateBasedStatement                    ParameterExceptionField = "RATE_BASED_STATEMENT"
+	ParameterExceptionFieldRuleGroupReferenceStatement           ParameterExceptionField = "RULE_GROUP_REFERENCE_STATEMENT"
+	ParameterExceptionFieldRegexPatternReferenceStatement        ParameterExceptionField = "REGEX_PATTERN_REFERENCE_STATEMENT"
+	ParameterExceptionFieldIpSetReferenceStatement               ParameterExceptionField = "IP_SET_REFERENCE_STATEMENT"
+	ParameterExceptionFieldManagedRuleSetStatement               ParameterExceptionField = "MANAGED_RULE_SET_STATEMENT"
+	ParameterExceptionFieldLabelMatchStatement                   ParameterExceptionField = "LABEL_MATCH_STATEMENT"
+	ParameterExceptionFieldAndStatement                          ParameterExceptionField = "AND_STATEMENT"
+	ParameterExceptionFieldOrStatement                           ParameterExceptionField = "OR_STATEMENT"
+	ParameterExceptionFieldNotStatement                          ParameterExceptionField = "NOT_STATEMENT"
+	ParameterExceptionFieldIpAddress                             ParameterExceptionField = "IP_ADDRESS"
+	ParameterExceptionFieldIpAddressVersion                      ParameterExceptionField = "IP_ADDRESS_VERSION"
+	ParameterExceptionFieldFieldToMatch                          ParameterExceptionField = "FIELD_TO_MATCH"
+	ParameterExceptionFieldTextTransformation                    ParameterExceptionField = "TEXT_TRANSFORMATION"
+	ParameterExceptionFieldSingleQueryArgument                   ParameterExceptionField = "SINGLE_QUERY_ARGUMENT"
+	ParameterExceptionFieldSingleHeader                          ParameterExceptionField = "SINGLE_HEADER"
+	ParameterExceptionFieldDefaultAction                         ParameterExceptionField = "DEFAULT_ACTION"
+	ParameterExceptionFieldRuleAction                            ParameterExceptionField = "RULE_ACTION"
+	ParameterExceptionFieldEntityLimit                           ParameterExceptionField = "ENTITY_LIMIT"
+	ParameterExceptionFieldOverrideAction                        ParameterExceptionField = "OVERRIDE_ACTION"
+	ParameterExceptionFieldScopeValue                            ParameterExceptionField = "SCOPE_VALUE"
+	ParameterExceptionFieldResourceArn                           ParameterExceptionField = "RESOURCE_ARN"
+	ParameterExceptionFieldResourceType                          ParameterExceptionField = "RESOURCE_TYPE"
+	ParameterExceptionFieldTags                                  ParameterExceptionField = "TAGS"
+	ParameterExceptionFieldTagKeys                               ParameterExceptionField = "TAG_KEYS"
+	ParameterExceptionFieldMetricName                            ParameterExceptionField = "METRIC_NAME"
+	ParameterExceptionFieldFirewallManagerStatement              ParameterExceptionField = "FIREWALL_MANAGER_STATEMENT"
+	ParameterExceptionFieldFallbackBehavior                      ParameterExceptionField = "FALLBACK_BEHAVIOR"
+	ParameterExceptionFieldPosition                              ParameterExceptionField = "POSITION"
+	ParameterExceptionFieldForwardedIpConfig                     ParameterExceptionField = "FORWARDED_IP_CONFIG"
+	ParameterExceptionFieldIpSetForwardedIpConfig                ParameterExceptionField = "IP_SET_FORWARDED_IP_CONFIG"
+	ParameterExceptionFieldHeaderName                            ParameterExceptionField = "HEADER_NAME"
+	ParameterExceptionFieldCustomRequestHandling                 ParameterExceptionField = "CUSTOM_REQUEST_HANDLING"
+	ParameterExceptionFieldResponseContentType                   ParameterExceptionField = "RESPONSE_CONTENT_TYPE"
+	ParameterExceptionFieldCustomResponse                        ParameterExceptionField = "CUSTOM_RESPONSE"
+	ParameterExceptionFieldCustomResponseBody                    ParameterExceptionField = "CUSTOM_RESPONSE_BODY"
+	ParameterExceptionFieldJsonMatchPattern                      ParameterExceptionField = "JSON_MATCH_PATTERN"
+	ParameterExceptionFieldJsonMatchScope                        ParameterExceptionField = "JSON_MATCH_SCOPE"
+	ParameterExceptionFieldBodyParsingFallbackBehavior           ParameterExceptionField = "BODY_PARSING_FALLBACK_BEHAVIOR"
+	ParameterExceptionFieldLoggingFilter                         ParameterExceptionField = "LOGGING_FILTER"
+	ParameterExceptionFieldFilterCondition                       ParameterExceptionField = "FILTER_CONDITION"
+	ParameterExceptionFieldExpireTimestamp                       ParameterExceptionField = "EXPIRE_TIMESTAMP"
+	ParameterExceptionFieldChangePropagationStatus               ParameterExceptionField = "CHANGE_PROPAGATION_STATUS"
+	ParameterExceptionFieldAssociableResource                    ParameterExceptionField = "ASSOCIABLE_RESOURCE"
+	ParameterExceptionFieldLogDestination                        ParameterExceptionField = "LOG_DESTINATION"
+	ParameterExceptionFieldManagedRuleGroupConfig                ParameterExceptionField = "MANAGED_RULE_GROUP_CONFIG"
+	ParameterExceptionFieldPayloadType                           ParameterExceptionField = "PAYLOAD_TYPE"
+	ParameterExceptionFieldHeaderMatchPattern                    ParameterExceptionField = "HEADER_MATCH_PATTERN"
+	ParameterExceptionFieldCookieMatchPattern                    ParameterExceptionField = "COOKIE_MATCH_PATTERN"
+	ParameterExceptionFieldMapMatchScope                         ParameterExceptionField = "MAP_MATCH_SCOPE"
+	ParameterExceptionFieldOversizeHandling                      ParameterExceptionField = "OVERSIZE_HANDLING"
+	ParameterExceptionFieldChallengeConfig                       ParameterExceptionField = "CHALLENGE_CONFIG"
+	ParameterExceptionFieldTokenDomain                           ParameterExceptionField = "TOKEN_DOMAIN"
+	ParameterExceptionFieldAtpRuleSetResponseInspection          ParameterExceptionField = "ATP_RULE_SET_RESPONSE_INSPECTION"
+	ParameterExceptionFieldAssociatedResourceType                ParameterExceptionField = "ASSOCIATED_RESOURCE_TYPE"
+	ParameterExceptionFieldScopeDown                             ParameterExceptionField = "SCOPE_DOWN"
+	ParameterExceptionFieldCustomKeys                            ParameterExceptionField = "CUSTOM_KEYS"
+	ParameterExceptionFieldAcpRuleSetResponseInspection          ParameterExceptionField = "ACP_RULE_SET_RESPONSE_INSPECTION"
+	ParameterExceptionFieldDataProtectionConfig                  ParameterExceptionField = "DATA_PROTECTION_CONFIG"
+	ParameterExceptionFieldLowReputationMode                     ParameterExceptionField = "LOW_REPUTATION_MODE"
+	ParameterExceptionFieldMonetizationConfig                    ParameterExceptionField = "MONETIZATION_CONFIG"
+	ParameterExceptionFieldWalletAddress                         ParameterExceptionField = "WALLET_ADDRESS"
+	ParameterExceptionFieldPriceAmount                           ParameterExceptionField = "PRICE_AMOUNT"
+	ParameterExceptionFieldPaymentNetwork                        ParameterExceptionField = "PAYMENT_NETWORK"
+	ParameterExceptionFieldPreParseTextTransformation            ParameterExceptionField = "PRE_PARSE_TEXT_TRANSFORMATION"
+	ParameterExceptionFieldChallengeJavascriptSdkInjectionConfig ParameterExceptionField = "CHALLENGE_JAVASCRIPT_SDK_INJECTION_CONFIG"
+	ParameterExceptionFieldBedrockGuardrails                     ParameterExceptionField = "BEDROCK_GUARDRAILS"
+	ParameterExceptionFieldRoleArn                               ParameterExceptionField = "ROLE_ARN"
 )
 
 // Values returns all known values for ParameterExceptionField. Note that this can
@@ -1233,6 +1411,9 @@ func (ParameterExceptionField) Values() []ParameterExceptionField {
 		"PRICE_AMOUNT",
 		"PAYMENT_NETWORK",
 		"PRE_PARSE_TEXT_TRANSFORMATION",
+		"CHALLENGE_JAVASCRIPT_SDK_INJECTION_CONFIG",
+		"BEDROCK_GUARDRAILS",
+		"ROLE_ARN",
 	}
 }
 
@@ -1554,6 +1735,7 @@ type SizeInspectionLimit string
 
 // Enum values for SizeInspectionLimit
 const (
+	SizeInspectionLimitKb8  SizeInspectionLimit = "KB_8"
 	SizeInspectionLimitKb16 SizeInspectionLimit = "KB_16"
 	SizeInspectionLimitKb32 SizeInspectionLimit = "KB_32"
 	SizeInspectionLimitKb48 SizeInspectionLimit = "KB_48"
@@ -1566,6 +1748,7 @@ const (
 // The ordering of this slice is not guaranteed to be stable across updates.
 func (SizeInspectionLimit) Values() []SizeInspectionLimit {
 	return []SizeInspectionLimit{
+		"KB_8",
 		"KB_16",
 		"KB_32",
 		"KB_48",

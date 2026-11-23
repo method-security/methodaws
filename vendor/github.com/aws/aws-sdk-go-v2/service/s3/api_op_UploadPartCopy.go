@@ -504,6 +504,14 @@ type UploadPartCopyOutput struct {
 	// the only valid server side encryption option is aws:fsx .
 	ServerSideEncryption types.ServerSideEncryption
 
+	// Version ID of the object.
+	//
+	// Returns the Version ID of the object for the copied part, if bucket versioning
+	// is enabled.
+	//
+	// This functionality is not supported for directory buckets.
+	VersionId *string
+
 	// Metadata pertaining to the operation's result.
 	ResultMetadata middleware.Metadata
 
@@ -520,9 +528,6 @@ func (c *Client) addOperationUploadPartCopyMiddlewares(stack *middleware.Stack, 
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

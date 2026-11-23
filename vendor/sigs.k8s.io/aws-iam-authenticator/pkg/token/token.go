@@ -98,7 +98,7 @@ const (
 	// The actual token expiration (presigned STS urls are valid for 15 minutes after timestamp in x-amz-date).
 	presignedURLExpiration = 15 * time.Minute
 	v1Prefix               = "k8s-aws-v1."
-	maxTokenLenBytes       = 1024 * 4
+	maxTokenLenBytes       = 1024 * 16
 	clusterIDHeader        = "x-k8s-aws-id"
 	// Format of the X-Amz-Date header used for expiration
 	// https://golang.org/pkg/time/#pkg-constants

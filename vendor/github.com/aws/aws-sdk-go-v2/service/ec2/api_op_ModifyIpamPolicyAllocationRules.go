@@ -56,6 +56,16 @@ type ModifyIpamPolicyAllocationRulesInput struct {
 	//
 	//   - Elastic IP addresses
 	//
+	//   - Application Load Balancers
+	//
+	//   - Amazon RDS
+	//
+	//   - NAT gateways in regional availability mode
+	//
+	//   - Lambda Network Connector
+	//
+	//   - Automated Internet Firewall
+	//
 	// This member is required.
 	ResourceType types.IpamPolicyResourceType
 
@@ -96,9 +106,6 @@ func (c *Client) addOperationModifyIpamPolicyAllocationRulesMiddlewares(stack *m
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

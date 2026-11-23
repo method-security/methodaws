@@ -1268,6 +1268,11 @@ type ConnectionGroup struct {
 	// A complex type that contains zero or more Tag elements.
 	Tags *Tags
 
+	// The distribution whose certificate CloudFront uses for viewer requests that
+	// arrive on the connection group's Anycast static IPs without Server Name
+	// Indication (SNI).
+	ViewerFallback *ViewerFallback
+
 	noSmithyDocumentSerde
 }
 
@@ -1332,6 +1337,11 @@ type ConnectionGroupSummary struct {
 
 	// The status of the connection group.
 	Status *string
+
+	// The distribution whose certificate CloudFront uses for viewer requests that
+	// arrive on the connection group's Anycast static IPs without Server Name
+	// Indication (SNI).
+	ViewerFallback *ViewerFallback
 
 	noSmithyDocumentSerde
 }
@@ -1763,6 +1773,24 @@ type CustomOriginConfig struct {
 	// your origin uses both IPv4 and IPv6 protocols, you can choose dualstack to help
 	// optimize reliability.
 	IpAddressType IpAddressType
+
+	// The HTTP version that CloudFront uses for requests to your custom origin. Valid
+	// values are http1.1 and http2 . If you don't specify a value, CloudFront uses
+	// HTTP/1.1.
+	//
+	// When you specify http2 , CloudFront offers HTTP/2 to the origin by using ALPN.
+	// If the origin doesn't negotiate HTTP/2, CloudFront uses HTTP/1.1. CloudFront
+	// uses HTTP/2 only over Transport Layer Security (TLS) 1.2 or later. Otherwise, it
+	// uses HTTP/1.1.
+	//
+	// If you use a version of an AWS SDK or the AWS CLI that doesn't support this
+	// field, an update that sends back a configuration you got from CloudFront removes
+	// the value, and CloudFront then uses HTTP/1.1.
+	//
+	// For more information, see [Origin HTTP version] in the Amazon CloudFront Developer Guide.
+	//
+	// [Origin HTTP version]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesOrigin.html#DownloadDistValuesOriginHttpVersion
+	OriginHttpVersion OriginHttpVersion
 
 	// Specifies how long, in seconds, CloudFront persists its connection to the
 	// origin. The minimum timeout is 1 second, the maximum is 120 seconds, and the
@@ -2920,6 +2948,19 @@ type DomainItem struct {
 	// This member is required.
 	Domain *string
 
+	// Specifies which requests for this domain CloudFront routes to the distribution
+	// tenant. Valid values are:
+	//
+	//   - any – CloudFront routes requests for this domain to the distribution tenant
+	//   regardless of the IP address that they arrive on. This is the default if you
+	//   don't specify a value.
+	//
+	//   - anycast-ip-list-only – CloudFront routes requests for this domain to the
+	//   distribution tenant only when they arrive on the Anycast static IPs of the
+	//   distribution tenant's connection group. CloudFront treats requests that arrive
+	//   on other IP addresses as requests for an unknown domain.
+	ServeOn ServeOn
+
 	noSmithyDocumentSerde
 }
 
@@ -2930,6 +2971,19 @@ type DomainResult struct {
 	//
 	// This member is required.
 	Domain *string
+
+	// Specifies which requests for this domain CloudFront routes to the distribution
+	// tenant. Valid values are:
+	//
+	//   - any – CloudFront routes requests for this domain to the distribution tenant
+	//   regardless of the IP address that they arrive on. This is the default if you
+	//   don't specify a value.
+	//
+	//   - anycast-ip-list-only – CloudFront routes requests for this domain to the
+	//   distribution tenant only when they arrive on the Anycast static IPs of the
+	//   distribution tenant's connection group. CloudFront treats requests that arrive
+	//   on other IP addresses as requests for an unknown domain.
+	ServeOn ServeOn
 
 	// Whether the domain is active or inactive.
 	Status DomainStatus
@@ -4361,6 +4415,14 @@ type OriginAccessControlConfig struct {
 	//   must add the Authorization header to a [cache policy]for all cache behaviors that use
 	//   origins associated with this origin access control.
 	//
+	//   - always-amz-auth – CloudFront signs all origin requests with Amazon
+	//   authentication headers. If the viewer request contains the Authorization
+	//   header, then CloudFront also forwards that header to the origin. This value is
+	//   only valid with Lambda-Web origins. WARNING: To forward the Authorization
+	//   header from the viewer request, you must add the Authorization header to a [cache policy]
+	//   for all cache behaviors that use origins associated with this origin access
+	//   control.
+	//
 	// [origin access control advanced settings]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html#oac-advanced-settings
 	// [cache policy]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/controlling-the-cache-key.html
 	//
@@ -4368,7 +4430,8 @@ type OriginAccessControlConfig struct {
 	SigningBehavior OriginAccessControlSigningBehaviors
 
 	// The signing protocol of the origin access control, which determines how
-	// CloudFront signs (authenticates) requests. The only valid value is sigv4 .
+	// CloudFront signs (authenticates) requests. The only valid values are sigv4 and
+	// sigv4a .
 	//
 	// This member is required.
 	SigningProtocol OriginAccessControlSigningProtocols
@@ -4450,12 +4513,16 @@ type OriginAccessControlSummary struct {
 	//   Authorization header, CloudFront doesn't sign the origin request, but instead
 	//   passes along the Authorization header that it received in the viewer request.
 	//
+	//   - always-amz-auth – CloudFront signs all origin requests with Amazon
+	//   authentication headers, and forwards the viewer's Authorization header to the
+	//   origin if one is present. This value is only valid with Lambda-Web origins.
+	//
 	// This member is required.
 	SigningBehavior OriginAccessControlSigningBehaviors
 
 	// The signing protocol of the origin access control. The signing protocol
-	// determines how CloudFront signs (authenticates) requests. The only valid value
-	// is sigv4 .
+	// determines how CloudFront signs (authenticates) requests. The only valid values
+	// are sigv4 and sigv4a .
 	//
 	// This member is required.
 	SigningProtocol OriginAccessControlSigningProtocols
@@ -6886,15 +6953,27 @@ type ViewerCertificate struct {
 	//
 	//   - static-ip - Do not specify this value unless your distribution has been
 	//   enabled for this feature by the CloudFront team. If you have a use case that
-	//   requires static IP addresses for a distribution, contact CloudFront through the [Amazon Web Services Support Center]
+	//   requires static IP addresses for a distribution, contact CloudFront through the [Amazon Web ServicesSupport Center]
 	//   .
 	//
 	// If the distribution uses the CloudFront domain name such as
 	// d111111abcdef8.cloudfront.net , don't set a value for this field.
 	//
+	// [Amazon Web ServicesSupport Center]: https://console.aws.amazon.com/support/home
 	// [server name indication (SNI)]: https://en.wikipedia.org/wiki/Server_Name_Indication
-	// [Amazon Web Services Support Center]: https://console.aws.amazon.com/support/home
 	SSLSupportMethod SSLSupportMethod
+
+	noSmithyDocumentSerde
+}
+
+// The distribution whose certificate CloudFront uses for viewer requests that
+// arrive on the connection group's Anycast static IPs without Server Name
+// Indication (SNI). You can specify one distribution per Anycast static IP list.
+type ViewerFallback struct {
+
+	// The ID of the distribution whose certificate CloudFront uses to establish TLS
+	// connections for viewer requests that don't include SNI.
+	DistributionId *string
 
 	noSmithyDocumentSerde
 }
@@ -6958,6 +7037,24 @@ type VpcOriginConfig struct {
 	// This member is required.
 	VpcOriginId *string
 
+	// The HTTP version that CloudFront uses for requests to the VPC origin for this
+	// distribution. Valid values are http1.1 and http2 . If you don't specify a value,
+	// CloudFront uses HTTP/1.1.
+	//
+	// When you specify http2 , CloudFront offers HTTP/2 to the origin by using ALPN.
+	// If the origin doesn't negotiate HTTP/2, CloudFront uses HTTP/1.1. CloudFront
+	// uses HTTP/2 only over Transport Layer Security (TLS) 1.2 or later. Otherwise, it
+	// uses HTTP/1.1.
+	//
+	// If you use a version of an AWS SDK or the AWS CLI that doesn't support this
+	// field, an update that sends back a configuration you got from CloudFront removes
+	// the value, and CloudFront then uses HTTP/1.1.
+	//
+	// For more information, see [Origin HTTP version] in the Amazon CloudFront Developer Guide.
+	//
+	// [Origin HTTP version]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesOrigin.html#DownloadDistValuesOriginHttpVersion
+	OriginHttpVersion OriginHttpVersion
+
 	// Specifies how long, in seconds, CloudFront persists its connection to the
 	// origin. The minimum timeout is 1 second, the maximum is 120 seconds, and the
 	// default (if you don't specify otherwise) is 5 seconds.
@@ -7012,6 +7109,10 @@ type VpcOriginEndpointConfig struct {
 	//
 	// This member is required.
 	OriginProtocolPolicy OriginProtocolPolicy
+
+	// The IP address type of the CloudFront VPC origin endpoint configuration. Valid
+	// values are ipv4 and dualstack . IPv6-only is not supported for VPC origins.
+	IpAddressType VpcIpAddressType
 
 	// A complex type that contains information about the SSL/TLS protocols that
 	// CloudFront can use when establishing an HTTPS connection with your origin.
@@ -7094,6 +7195,10 @@ type VpcOriginSummary struct {
 
 	// The account ID of the Amazon Web Services account that owns the VPC origin.
 	AccountId *string
+
+	// The IP address type of the CloudFront VPC origin. Valid values are ipv4 and
+	// dualstack . IPv6-only is not supported for VPC origins.
+	IpAddressType VpcIpAddressType
 
 	noSmithyDocumentSerde
 }

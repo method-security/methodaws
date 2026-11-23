@@ -135,7 +135,7 @@ func noHTTPProxy(*http.Request) (*url.URL, error) {
 func socksProxyServiceOption(transportOption func(*http.Transport)) func(string, any) {
 	return func(_ string, options any) {
 		optionsValue := reflect.ValueOf(options)
-		if optionsValue.Kind() != reflect.Ptr || optionsValue.IsNil() {
+		if optionsValue.Kind() != reflect.Pointer || optionsValue.IsNil() {
 			return
 		}
 
