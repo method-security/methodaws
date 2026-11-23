@@ -68,6 +68,16 @@ type GetIpamPolicyAllocationRulesInput struct {
 	// through IPAM policies. Supported services and resource types include:
 	//
 	//   - Elastic IP addresses
+	//
+	//   - Application Load Balancers
+	//
+	//   - Amazon RDS
+	//
+	//   - NAT gateways in regional availability mode
+	//
+	//   - Lambda Network Connector
+	//
+	//   - Automated Internet Firewall
 	ResourceType types.IpamPolicyResourceType
 
 	noSmithyDocumentSerde
@@ -101,9 +111,6 @@ func (c *Client) addOperationGetIpamPolicyAllocationRulesMiddlewares(stack *midd
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

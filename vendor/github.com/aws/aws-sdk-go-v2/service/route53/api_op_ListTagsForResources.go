@@ -43,6 +43,8 @@ type ListTagsForResourcesInput struct {
 	//
 	//   - The resource type for health checks is healthcheck .
 	//
+	//   - The resource type for health check sources is healthchecksource .
+	//
 	//   - The resource type for hosted zones is hostedzone .
 	//
 	// This member is required.
@@ -76,9 +78,6 @@ func (c *Client) addOperationListTagsForResourcesMiddlewares(stack *middleware.S
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

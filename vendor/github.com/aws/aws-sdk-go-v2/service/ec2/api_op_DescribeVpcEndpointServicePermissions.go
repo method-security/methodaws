@@ -41,6 +41,9 @@ type DescribeVpcEndpointServicePermissionsInput struct {
 
 	// The filters.
 	//
+	//   - permission-type - The permission type ( vpc-endpoint |
+	//   transit-gateway-attachment ).
+	//
 	//   - principal - The ARN of the principal.
 	//
 	//   - principal-type - The principal type ( All | Service | OrganizationUnit |
@@ -84,9 +87,6 @@ func (c *Client) addOperationDescribeVpcEndpointServicePermissionsMiddlewares(st
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

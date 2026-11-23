@@ -43,6 +43,11 @@ type MonitorInstancesInput struct {
 	// UnauthorizedOperation .
 	DryRun *bool
 
+	// The IDs of the metric categories to associate with the instances. The specified
+	// metric categories are added to any metric categories that are already associated
+	// with the instances.
+	MetricCategoryIds []string
+
 	noSmithyDocumentSerde
 }
 
@@ -67,9 +72,6 @@ func (c *Client) addOperationMonitorInstancesMiddlewares(stack *middleware.Stack
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

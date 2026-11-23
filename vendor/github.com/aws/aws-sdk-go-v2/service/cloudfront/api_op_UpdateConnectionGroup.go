@@ -49,6 +49,11 @@ type UpdateConnectionGroupInput struct {
 	// [Enable IPv6]: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/distribution-web-values-specify.html#DownloadDistValuesEnableIPv6
 	Ipv6Enabled *bool
 
+	// The distribution whose certificate CloudFront uses for viewer requests that
+	// arrive on the connection group's Anycast static IPs without Server Name
+	// Indication (SNI).
+	ViewerFallback *types.ViewerFallback
+
 	noSmithyDocumentSerde
 }
 
@@ -76,9 +81,6 @@ func (c *Client) addOperationUpdateConnectionGroupMiddlewares(stack *middleware.
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

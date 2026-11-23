@@ -4,7 +4,9 @@ package apigateway
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go-v2/service/apigateway/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/apigateway/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
 )
 
@@ -40,6 +42,21 @@ type GetAuthorizerInput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *GetAuthorizerInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.GetAuthorizerRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *GetAuthorizerInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.AuthorizerId != nil {
+		s.WriteString(schemas.GetAuthorizerRequest_authorizerId, *v.AuthorizerId)
+	}
+	if v.RestApiId != nil {
+		s.WriteString(schemas.GetAuthorizerRequest_restApiId, *v.RestApiId)
+	}
+}
+
 // Represents an authorization layer for methods. If enabled on a method, API
 // Gateway will activate the authorizer when a client calls the method.
 type GetAuthorizerOutput struct {
@@ -51,13 +68,13 @@ type GetAuthorizerOutput struct {
 	// Specifies the required credentials as an IAM role for API Gateway to invoke the
 	// authorizer. To specify an IAM role for API Gateway to assume, use the role's
 	// Amazon Resource Name (ARN). To use resource-based permissions on the Lambda
-	// function, specify null.
+	// function, specify null. This property is not supported for JWT authorizers.
 	AuthorizerCredentials *string
 
 	// The TTL in seconds of cached authorizer results. If it equals 0, authorization
 	// caching is disabled. If it is greater than 0, API Gateway will cache authorizer
 	// responses. If this field is not set, the default value is 300. The maximum value
-	// is 3600, or 1 hour.
+	// is 3600, or 1 hour. This property is not supported for JWT authorizers.
 	AuthorizerResultTtlInSeconds *int32
 
 	// Specifies the authorizer's Uniform Resource Identifier (URI). For TOKEN or
@@ -69,7 +86,8 @@ type GetAuthorizerOutput struct {
 	// same as the region hosting the Lambda function, path indicates that the
 	// remaining substring in the URI should be treated as the path to the resource,
 	// including the initial / . For Lambda functions, this is usually of the form
-	// /2015-03-31/functions/[FunctionARN]/invocations .
+	// /2015-03-31/functions/[FunctionARN]/invocations . This property is not supported
+	// for JWT authorizers.
 	AuthorizerUri *string
 
 	// The identifier for the authorizer resource.
@@ -92,7 +110,10 @@ type GetAuthorizerOutput struct {
 	// a 401 Unauthorized response without calling the Lambda function. The valid value
 	// is a string of comma-separated mapping expressions of the specified request
 	// parameters. When the authorization caching is not enabled, this property is
-	// optional.
+	// optional. For a JWT authorizer, this is required and must be a single
+	// request-header mapping expression, method.request.header. , for example,
+	// method.request.header.Authorization . Query string parameters are not supported,
+	// and there is no default.
 	IdentitySource *string
 
 	// A validation expression for the incoming identity token. For TOKEN authorizers,
@@ -101,8 +122,12 @@ type GetAuthorizerOutput struct {
 	// the specified regular expression. It will invoke the authorizer's Lambda
 	// function when there is a match. Otherwise, it will return a 401 Unauthorized
 	// response without calling the Lambda function. The validation expression does not
-	// apply to the REQUEST authorizer.
+	// apply to the REQUEST or JWT authorizer.
 	IdentityValidationExpression *string
+
+	// The configuration returned for a JWT authorizer. This field is present only
+	// when type is JWT .
+	JwtConfiguration *types.JwtConfiguration
 
 	// The name of the authorizer.
 	Name *string
@@ -110,13 +135,15 @@ type GetAuthorizerOutput struct {
 	// A list of the Amazon Cognito user pool ARNs for the COGNITO_USER_POOLS
 	// authorizer. Each element is of this format:
 	// arn:aws:cognito-idp:{region}:{account_id}:userpool/{user_pool_id} . For a TOKEN
-	// or REQUEST authorizer, this is not defined.
+	// or REQUEST authorizer, this is not defined. This property is not supported for
+	// JWT authorizers.
 	ProviderARNs []string
 
 	// The authorizer type. Valid values are TOKEN for a Lambda function using a
 	// single authorization token submitted in a custom header, REQUEST for a Lambda
-	// function using incoming request parameters, and COGNITO_USER_POOLS for using an
-	// Amazon Cognito user pool.
+	// function using incoming request parameters, COGNITO_USER_POOLS for using an
+	// Amazon Cognito user pool, and JWT for using a native JWT authorizer with the
+	// trusted issuers, audiences, and signing algorithms that you declare.
 	Type types.AuthorizerType
 
 	// Metadata pertaining to the operation's result.
@@ -125,19 +152,100 @@ type GetAuthorizerOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *GetAuthorizerOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.Authorizer)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *GetAuthorizerOutput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.AuthType != nil {
+		s.WriteString(schemas.Authorizer_authType, *v.AuthType)
+	}
+	if v.AuthorizerCredentials != nil {
+		s.WriteString(schemas.Authorizer_authorizerCredentials, *v.AuthorizerCredentials)
+	}
+	if v.AuthorizerResultTtlInSeconds != nil {
+		s.WriteInt32(schemas.Authorizer_authorizerResultTtlInSeconds, *v.AuthorizerResultTtlInSeconds)
+	}
+	if v.AuthorizerUri != nil {
+		s.WriteString(schemas.Authorizer_authorizerUri, *v.AuthorizerUri)
+	}
+	if v.Id != nil {
+		s.WriteString(schemas.Authorizer_id, *v.Id)
+	}
+	if v.IdentitySource != nil {
+		s.WriteString(schemas.Authorizer_identitySource, *v.IdentitySource)
+	}
+	if v.IdentityValidationExpression != nil {
+		s.WriteString(schemas.Authorizer_identityValidationExpression, *v.IdentityValidationExpression)
+	}
+	if v.JwtConfiguration != nil {
+		s.WriteStruct(schemas.Authorizer_jwtConfiguration)
+		v.JwtConfiguration.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.Name != nil {
+		s.WriteString(schemas.Authorizer_name, *v.Name)
+	}
+	if v.ProviderARNs != nil {
+		serializeListOfARNs(s, schemas.Authorizer_providerARNs, v.ProviderARNs)
+	}
+	if v.Type != "" {
+		s.WriteString(schemas.Authorizer_type, string(v.Type))
+	}
+}
+func (v *GetAuthorizerOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.Authorizer, func(s *smithy.Schema) error {
+		switch s {
+		case schemas.Authorizer_authType:
+			v.AuthType = new(string)
+			return d.ReadString(schemas.Authorizer_authType, v.AuthType)
+		case schemas.Authorizer_authorizerCredentials:
+			v.AuthorizerCredentials = new(string)
+			return d.ReadString(schemas.Authorizer_authorizerCredentials, v.AuthorizerCredentials)
+		case schemas.Authorizer_authorizerResultTtlInSeconds:
+			v.AuthorizerResultTtlInSeconds = new(int32)
+			return d.ReadInt32(schemas.Authorizer_authorizerResultTtlInSeconds, v.AuthorizerResultTtlInSeconds)
+		case schemas.Authorizer_authorizerUri:
+			v.AuthorizerUri = new(string)
+			return d.ReadString(schemas.Authorizer_authorizerUri, v.AuthorizerUri)
+		case schemas.Authorizer_id:
+			v.Id = new(string)
+			return d.ReadString(schemas.Authorizer_id, v.Id)
+		case schemas.Authorizer_identitySource:
+			v.IdentitySource = new(string)
+			return d.ReadString(schemas.Authorizer_identitySource, v.IdentitySource)
+		case schemas.Authorizer_identityValidationExpression:
+			v.IdentityValidationExpression = new(string)
+			return d.ReadString(schemas.Authorizer_identityValidationExpression, v.IdentityValidationExpression)
+		case schemas.Authorizer_jwtConfiguration:
+			v.JwtConfiguration = &types.JwtConfiguration{}
+			return v.JwtConfiguration.Deserialize(d)
+		case schemas.Authorizer_name:
+			v.Name = new(string)
+			return d.ReadString(schemas.Authorizer_name, v.Name)
+		case schemas.Authorizer_providerARNs:
+			return deserializeListOfARNs(d, schemas.Authorizer_providerARNs, &v.ProviderARNs)
+		case schemas.Authorizer_type:
+			var ev string
+			if err := d.ReadString(schemas.Authorizer_type, &ev); err != nil {
+				return err
+			}
+			v.Type = types.AuthorizerType(ev)
+			return nil
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationGetAuthorizerMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	err = stack.Serialize.Add(&awsRestjson1_serializeOpGetAuthorizer{}, middleware.After)
-	if err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.GetAuthorizer, schemas.GetAuthorizerRequest, schemas.Authorizer)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Deserialize.Add(&awsRestjson1_deserializeOpGetAuthorizer{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.GetAuthorizer, schemas.GetAuthorizerRequest, schemas.Authorizer), output: &GetAuthorizerOutput{}}, middleware.After); err != nil {
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

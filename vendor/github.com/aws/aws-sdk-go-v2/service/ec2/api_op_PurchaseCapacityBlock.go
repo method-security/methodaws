@@ -58,6 +58,11 @@ type PurchaseCapacityBlockOutput struct {
 	// The Capacity Reservation.
 	CapacityReservation *types.CapacityReservation
 
+	// The Capacity Reservations created as a result of the Capacity Block purchase.
+	// When a Capacity Block offering contains multiple segments, a separate Capacity
+	// Reservation is created for each segment.
+	CapacityReservations []types.CapacityReservation
+
 	// Metadata pertaining to the operation's result.
 	ResultMetadata middleware.Metadata
 
@@ -74,9 +79,6 @@ func (c *Client) addOperationPurchaseCapacityBlockMiddlewares(stack *middleware.
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

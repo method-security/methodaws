@@ -17,8 +17,9 @@ import (
 // Describes the specified network interfaces or all your network interfaces.
 //
 // If you have a large number of network interfaces, the operation fails unless
-// you use pagination or one of the following filters: group-id , mac-address ,
-// private-dns-name , private-ip-address , subnet-id , or vpc-id .
+// you use pagination or one of the following filters: attachment.instance-id ,
+// group-id , mac-address , private-dns-name , private-ip-address , subnet-id , or
+// vpc-id .
 //
 // We strongly recommend using only paginated requests. Unpaginated requests are
 // susceptible to throttling and timeouts.
@@ -210,9 +211,6 @@ func (c *Client) addOperationDescribeNetworkInterfacesMiddlewares(stack *middlew
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

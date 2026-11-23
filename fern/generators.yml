@@ -3,7 +3,7 @@ groups:
   local:
     generators:
       - name: fernapi/fern-go-sdk
-        version: 1.60.2
+        version: 1.72.3
         config:
           importPath: github.com/Method-Security/methodaws/generated/go
         output:

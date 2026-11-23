@@ -4,10 +4,12 @@ package lambda
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go-v2/service/lambda/schemas"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
 )
 
-// Removes a concurrent execution limit from a function.
+// Removes a concurrent execution limit from a Lambda Event Function.
 func (c *Client) DeleteFunctionConcurrency(ctx context.Context, params *DeleteFunctionConcurrencyInput, optFns ...func(*Options)) (*DeleteFunctionConcurrencyOutput, error) {
 	if params == nil {
 		params = &DeleteFunctionConcurrencyInput{}
@@ -44,6 +46,18 @@ type DeleteFunctionConcurrencyInput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *DeleteFunctionConcurrencyInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.DeleteFunctionConcurrencyRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *DeleteFunctionConcurrencyInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.FunctionName != nil {
+		s.WriteString(schemas.DeleteFunctionConcurrencyRequest_FunctionName, *v.FunctionName)
+	}
+}
+
 type DeleteFunctionConcurrencyOutput struct {
 	// Metadata pertaining to the operation's result.
 	ResultMetadata middleware.Metadata
@@ -51,19 +65,29 @@ type DeleteFunctionConcurrencyOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *DeleteFunctionConcurrencyOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(nil)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *DeleteFunctionConcurrencyOutput) SerializeMembers(s smithy.ShapeSerializer) {
+}
+func (v *DeleteFunctionConcurrencyOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, nil, func(s *smithy.Schema) error {
+		switch s {
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationDeleteFunctionConcurrencyMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	err = stack.Serialize.Add(&awsRestjson1_serializeOpDeleteFunctionConcurrency{}, middleware.After)
-	if err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.DeleteFunctionConcurrency, schemas.DeleteFunctionConcurrencyRequest, nil)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Deserialize.Add(&awsRestjson1_deserializeOpDeleteFunctionConcurrency{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.DeleteFunctionConcurrency, schemas.DeleteFunctionConcurrencyRequest, nil), output: &DeleteFunctionConcurrencyOutput{}}, middleware.After); err != nil {
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

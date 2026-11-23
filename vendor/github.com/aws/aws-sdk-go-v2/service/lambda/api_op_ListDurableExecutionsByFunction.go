@@ -5,7 +5,9 @@ package lambda
 import (
 	"context"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/service/lambda/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/lambda/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
 	"time"
 )
@@ -48,8 +50,8 @@ type ListDurableExecutionsByFunctionInput struct {
 	// Maximum number of executions to return (1-1000). Default is 100.
 	MaxItems int32
 
-	// The function version or alias. If not specified, lists executions for the
-	// $LATEST version.
+	// The function version to filter executions by. If you don't specify a qualifier,
+	// this operation returns executions across all versions of the Lambda function.
 	Qualifier *string
 
 	// Set to true to return results in chronological order (oldest first). Default is
@@ -62,11 +64,65 @@ type ListDurableExecutionsByFunctionInput struct {
 	// Filter executions that started before this timestamp (ISO 8601 format).
 	StartedBefore *time.Time
 
-	// Filter executions by status. Valid values: RUNNING, SUCCEEDED, FAILED,
-	// TIMED_OUT, STOPPED.
+	// Filters the executions by status. Specify one of the following values:
+	//
+	//   - RUNNING – The execution is running or waiting for pending operations to
+	//   complete.
+	//
+	//   - PAUSING – The execution is waiting for an in-progress invocation to reach
+	//   its next checkpoint before it pauses.
+	//
+	//   - PAUSED – The execution is paused, and Lambda doesn't invoke your function.
+	//
+	//   - SUCCEEDED – The execution completed successfully.
+	//
+	//   - FAILED – The execution completed with an error.
+	//
+	//   - TIMED_OUT – The execution exceeded its execution timeout.
+	//
+	//   - STOPPED – A StopDurableExecution request stopped the execution.
+	//
+	//   - DELETING – A DeleteDurableExecution request is deleting the execution and
+	//   its data.
 	Statuses []types.ExecutionStatus
 
 	noSmithyDocumentSerde
+}
+
+func (v *ListDurableExecutionsByFunctionInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.ListDurableExecutionsByFunctionRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *ListDurableExecutionsByFunctionInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.DurableExecutionName != nil {
+		s.WriteString(schemas.ListDurableExecutionsByFunctionRequest_DurableExecutionName, *v.DurableExecutionName)
+	}
+	if v.FunctionName != nil {
+		s.WriteString(schemas.ListDurableExecutionsByFunctionRequest_FunctionName, *v.FunctionName)
+	}
+	if v.Marker != nil {
+		s.WriteString(schemas.ListDurableExecutionsByFunctionRequest_Marker, *v.Marker)
+	}
+	if v.MaxItems != 0 {
+		s.WriteInt32(schemas.ListDurableExecutionsByFunctionRequest_MaxItems, v.MaxItems)
+	}
+	if v.Qualifier != nil {
+		s.WriteString(schemas.ListDurableExecutionsByFunctionRequest_Qualifier, *v.Qualifier)
+	}
+	if v.ReverseOrder != nil {
+		s.WriteBool(schemas.ListDurableExecutionsByFunctionRequest_ReverseOrder, *v.ReverseOrder)
+	}
+	if v.StartedAfter != nil {
+		s.WriteTime(schemas.ListDurableExecutionsByFunctionRequest_StartedAfter, *v.StartedAfter)
+	}
+	if v.StartedBefore != nil {
+		s.WriteTime(schemas.ListDurableExecutionsByFunctionRequest_StartedBefore, *v.StartedBefore)
+	}
+	if v.Statuses != nil {
+		serializeExecutionStatusList(s, schemas.ListDurableExecutionsByFunctionRequest_Statuses, v.Statuses)
+	}
 }
 
 // The response from the ListDurableExecutionsByFunction operation, containing a
@@ -86,19 +142,40 @@ type ListDurableExecutionsByFunctionOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *ListDurableExecutionsByFunctionOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.ListDurableExecutionsByFunctionResponse)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *ListDurableExecutionsByFunctionOutput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.DurableExecutions != nil {
+		serializeDurableExecutions(s, schemas.ListDurableExecutionsByFunctionResponse_DurableExecutions, v.DurableExecutions)
+	}
+	if v.NextMarker != nil {
+		s.WriteString(schemas.ListDurableExecutionsByFunctionResponse_NextMarker, *v.NextMarker)
+	}
+}
+func (v *ListDurableExecutionsByFunctionOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.ListDurableExecutionsByFunctionResponse, func(s *smithy.Schema) error {
+		switch s {
+		case schemas.ListDurableExecutionsByFunctionResponse_DurableExecutions:
+			return deserializeDurableExecutions(d, schemas.ListDurableExecutionsByFunctionResponse_DurableExecutions, &v.DurableExecutions)
+		case schemas.ListDurableExecutionsByFunctionResponse_NextMarker:
+			v.NextMarker = new(string)
+			return d.ReadString(schemas.ListDurableExecutionsByFunctionResponse_NextMarker, v.NextMarker)
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationListDurableExecutionsByFunctionMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	err = stack.Serialize.Add(&awsRestjson1_serializeOpListDurableExecutionsByFunction{}, middleware.After)
-	if err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.ListDurableExecutionsByFunction, schemas.ListDurableExecutionsByFunctionRequest, schemas.ListDurableExecutionsByFunctionResponse)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Deserialize.Add(&awsRestjson1_deserializeOpListDurableExecutionsByFunction{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.ListDurableExecutionsByFunction, schemas.ListDurableExecutionsByFunctionRequest, schemas.ListDurableExecutionsByFunctionResponse), output: &ListDurableExecutionsByFunctionOutput{}}, middleware.After); err != nil {
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

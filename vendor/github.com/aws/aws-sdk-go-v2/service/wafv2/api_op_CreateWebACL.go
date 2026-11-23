@@ -4,7 +4,9 @@ package wafv2
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go-v2/service/wafv2/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/wafv2/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
 )
 
@@ -69,6 +71,10 @@ type CreateWebACLInput struct {
 	// This member is required.
 	VisibilityConfig *types.VisibilityConfig
 
+	// Specifies the security analytics configuration for the web ACL. For more
+	// information, see AnalyticsConfig.
+	AnalyticsConfig *types.AnalyticsConfig
+
 	// Configures the ability for the WAF console to store and retrieve application
 	// attributes during the web ACL creation process. Application attributes help WAF
 	// give recommendations for protection packs.
@@ -79,14 +85,18 @@ type CreateWebACLInput struct {
 	//
 	// Use this to customize the maximum size of the request body that your protected
 	// resources forward to WAF for inspection. You can customize this setting for
-	// CloudFront, API Gateway, Amazon Cognito, App Runner, or Verified Access
-	// resources. The default setting is 16 KB (16,384 bytes).
+	// Application Load Balancer, CloudFront, API Gateway, Amazon Cognito, App Runner,
+	// or Verified Access resources. The default setting is 8 KB (8,192 bytes) for
+	// Application Load Balancer and 16 KB (16,384 bytes) for the other resource types.
 	//
 	// You are charged additional fees when your protected resources forward body
 	// sizes that are larger than the default. For more information, see [WAF Pricing].
 	//
-	// For Application Load Balancer and AppSync, the limit is fixed at 8 KB (8,192
-	// bytes).
+	// For AppSync, the limit is fixed at 8 KB (8,192 bytes).
+	//
+	// You can also use this to have your CloudFront distributions insert the WAF
+	// challenge JavaScript SDK into the HTML responses that they return. For more
+	// information, see the ChallengeJavascriptSdkInjection setting.
 	//
 	// [WAF Pricing]: http://aws.amazon.com/waf/pricing/
 	AssociationConfig *types.AssociationConfig
@@ -165,6 +175,86 @@ type CreateWebACLInput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *CreateWebACLInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.CreateWebACLRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *CreateWebACLInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.AnalyticsConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_AnalyticsConfig)
+		v.AnalyticsConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.ApplicationConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_ApplicationConfig)
+		v.ApplicationConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.AssociationConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_AssociationConfig)
+		v.AssociationConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.CaptchaConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_CaptchaConfig)
+		v.CaptchaConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.ChallengeConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_ChallengeConfig)
+		v.ChallengeConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.CustomResponseBodies != nil {
+		serializeCustomResponseBodies(s, schemas.CreateWebACLRequest_CustomResponseBodies, v.CustomResponseBodies)
+	}
+	if v.DataProtectionConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_DataProtectionConfig)
+		v.DataProtectionConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.DefaultAction != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_DefaultAction)
+		v.DefaultAction.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.Description != nil {
+		s.WriteString(schemas.CreateWebACLRequest_Description, *v.Description)
+	}
+	if v.MonetizationConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_MonetizationConfig)
+		v.MonetizationConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.Name != nil {
+		s.WriteString(schemas.CreateWebACLRequest_Name, *v.Name)
+	}
+	if v.OnSourceDDoSProtectionConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_OnSourceDDoSProtectionConfig)
+		v.OnSourceDDoSProtectionConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.Rules != nil {
+		serializeRules(s, schemas.CreateWebACLRequest_Rules, v.Rules)
+	}
+	if v.Scope != "" {
+		s.WriteString(schemas.CreateWebACLRequest_Scope, string(v.Scope))
+	}
+	if v.Tags != nil {
+		serializeTagList(s, schemas.CreateWebACLRequest_Tags, v.Tags)
+	}
+	if v.TokenDomains != nil {
+		serializeTokenDomains(s, schemas.CreateWebACLRequest_TokenDomains, v.TokenDomains)
+	}
+	if v.VisibilityConfig != nil {
+		s.WriteStruct(schemas.CreateWebACLRequest_VisibilityConfig)
+		v.VisibilityConfig.SerializeMembers(s)
+		s.CloseStruct()
+	}
+}
+
 type CreateWebACLOutput struct {
 
 	// High-level information about a WebACL, returned by operations like create and list.
@@ -178,19 +268,37 @@ type CreateWebACLOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *CreateWebACLOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.CreateWebACLResponse)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *CreateWebACLOutput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.Summary != nil {
+		s.WriteStruct(schemas.CreateWebACLResponse_Summary)
+		v.Summary.SerializeMembers(s)
+		s.CloseStruct()
+	}
+}
+func (v *CreateWebACLOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.CreateWebACLResponse, func(s *smithy.Schema) error {
+		switch s {
+		case schemas.CreateWebACLResponse_Summary:
+			v.Summary = &types.WebACLSummary{}
+			return v.Summary.Deserialize(d)
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationCreateWebACLMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	err = stack.Serialize.Add(&awsAwsjson11_serializeOpCreateWebACL{}, middleware.After)
-	if err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.CreateWebACL, schemas.CreateWebACLRequest, schemas.CreateWebACLResponse)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Deserialize.Add(&awsAwsjson11_deserializeOpCreateWebACL{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.CreateWebACL, schemas.CreateWebACLRequest, schemas.CreateWebACLResponse), output: &CreateWebACLOutput{}}, middleware.After); err != nil {
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}

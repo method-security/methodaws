@@ -596,6 +596,25 @@ func (MinimumProtocolVersion) Values() []MinimumProtocolVersion {
 	}
 }
 
+type OnDomainTakeover string
+
+// Enum values for OnDomainTakeover
+const (
+	OnDomainTakeoverAllow  OnDomainTakeover = "allow"
+	OnDomainTakeoverReject OnDomainTakeover = "reject"
+)
+
+// Values returns all known values for OnDomainTakeover. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (OnDomainTakeover) Values() []OnDomainTakeover {
+	return []OnDomainTakeover{
+		"allow",
+		"reject",
+	}
+}
+
 type OriginAccessControlOriginTypes string
 
 // Enum values for OriginAccessControlOriginTypes
@@ -624,9 +643,10 @@ type OriginAccessControlSigningBehaviors string
 
 // Enum values for OriginAccessControlSigningBehaviors
 const (
-	OriginAccessControlSigningBehaviorsNever      OriginAccessControlSigningBehaviors = "never"
-	OriginAccessControlSigningBehaviorsAlways     OriginAccessControlSigningBehaviors = "always"
-	OriginAccessControlSigningBehaviorsNoOverride OriginAccessControlSigningBehaviors = "no-override"
+	OriginAccessControlSigningBehaviorsNever         OriginAccessControlSigningBehaviors = "never"
+	OriginAccessControlSigningBehaviorsAlways        OriginAccessControlSigningBehaviors = "always"
+	OriginAccessControlSigningBehaviorsNoOverride    OriginAccessControlSigningBehaviors = "no-override"
+	OriginAccessControlSigningBehaviorsAlwaysAmzAuth OriginAccessControlSigningBehaviors = "always-amz-auth"
 )
 
 // Values returns all known values for OriginAccessControlSigningBehaviors. Note
@@ -639,6 +659,7 @@ func (OriginAccessControlSigningBehaviors) Values() []OriginAccessControlSigning
 		"never",
 		"always",
 		"no-override",
+		"always-amz-auth",
 	}
 }
 
@@ -646,7 +667,8 @@ type OriginAccessControlSigningProtocols string
 
 // Enum values for OriginAccessControlSigningProtocols
 const (
-	OriginAccessControlSigningProtocolsSigv4 OriginAccessControlSigningProtocols = "sigv4"
+	OriginAccessControlSigningProtocolsSigv4  OriginAccessControlSigningProtocols = "sigv4"
+	OriginAccessControlSigningProtocolsSigv4a OriginAccessControlSigningProtocols = "sigv4a"
 )
 
 // Values returns all known values for OriginAccessControlSigningProtocols. Note
@@ -657,6 +679,7 @@ const (
 func (OriginAccessControlSigningProtocols) Values() []OriginAccessControlSigningProtocols {
 	return []OriginAccessControlSigningProtocols{
 		"sigv4",
+		"sigv4a",
 	}
 }
 
@@ -677,6 +700,25 @@ func (OriginGroupSelectionCriteria) Values() []OriginGroupSelectionCriteria {
 	return []OriginGroupSelectionCriteria{
 		"default",
 		"media-quality-based",
+	}
+}
+
+type OriginHttpVersion string
+
+// Enum values for OriginHttpVersion
+const (
+	OriginHttpVersionHttp11 OriginHttpVersion = "http1.1"
+	OriginHttpVersionHttp2  OriginHttpVersion = "http2"
+)
+
+// Values returns all known values for OriginHttpVersion. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (OriginHttpVersion) Values() []OriginHttpVersion {
+	return []OriginHttpVersion{
+		"http1.1",
+		"http2",
 	}
 }
 
@@ -919,6 +961,25 @@ func (ResponseHeadersPolicyType) Values() []ResponseHeadersPolicyType {
 	}
 }
 
+type ServeOn string
+
+// Enum values for ServeOn
+const (
+	ServeOnAny               ServeOn = "any"
+	ServeOnAnycastIpListOnly ServeOn = "anycast-ip-list-only"
+)
+
+// Values returns all known values for ServeOn. Note that this can be expanded in
+// the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (ServeOn) Values() []ServeOn {
+	return []ServeOn{
+		"any",
+		"anycast-ip-list-only",
+	}
+}
+
 type SslProtocol string
 
 // Enum values for SslProtocol
@@ -1042,5 +1103,24 @@ func (ViewerProtocolPolicy) Values() []ViewerProtocolPolicy {
 		"allow-all",
 		"https-only",
 		"redirect-to-https",
+	}
+}
+
+type VpcIpAddressType string
+
+// Enum values for VpcIpAddressType
+const (
+	VpcIpAddressTypeIpv4      VpcIpAddressType = "ipv4"
+	VpcIpAddressTypeDualStack VpcIpAddressType = "dualstack"
+)
+
+// Values returns all known values for VpcIpAddressType. Note that this can be
+// expanded in the future, and so it is only as up to date as the client.
+//
+// The ordering of this slice is not guaranteed to be stable across updates.
+func (VpcIpAddressType) Values() []VpcIpAddressType {
+	return []VpcIpAddressType{
+		"ipv4",
+		"dualstack",
 	}
 }

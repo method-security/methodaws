@@ -653,6 +653,25 @@ type Include struct {
 	noSmithyDocumentSerde
 }
 
+// The container for S3 Storage Lens Intelligent-Tiering access tier metrics. When
+// enabled, S3 Storage Lens produces metrics for each individual S3
+// Intelligent-Tiering access tier instead of reporting a single aggregate value
+// for the INTELLIGENT_TIERING storage class.
+//
+// For more information about S3 Storage Lens, see [Assessing your storage activity and usage with S3 Storage Lens] in the Amazon S3 User Guide.
+// For a complete list of S3 Storage Lens metrics, see [S3 Storage Lens metrics glossary]in the Amazon S3 User Guide.
+//
+// [Assessing your storage activity and usage with S3 Storage Lens]: https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage_lens.html
+// [S3 Storage Lens metrics glossary]: https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage_lens_metrics_glossary.html
+type IntAccessTiers struct {
+
+	// A container that indicates whether S3 Storage Lens Intelligent-Tiering access
+	// tier metrics are enabled.
+	IsEnabled bool
+
+	noSmithyDocumentSerde
+}
+
 // A container element for the job configuration and status information returned
 // by a Describe Job request.
 type JobDescriptor struct {
@@ -1357,10 +1376,15 @@ type ListAccessGrantsLocationsEntry struct {
 }
 
 // Part of ListCallerAccessGrantsResult . Each entry includes the permission level
-// (READ, WRITE, or READWRITE) and the grant scope of the access grant. If the
-// grant also includes an application ARN, the grantee can only access the S3 data
-// through this application.
+// (READ, WRITE, or READWRITE) and the grant scope of the access grant. Each entry
+// also includes the ARN of the S3 Access Grants instance in which the grant was
+// created. If the grant also includes an application ARN, the grantee can only
+// access the S3 data through this application.
 type ListCallerAccessGrantsEntry struct {
+
+	// The Amazon Resource Name (ARN) of the S3 Access Grants instance in which the
+	// grant was created.
+	AccessGrantsInstanceArn *string
 
 	// The Amazon Resource Name (ARN) of an Amazon Web Services IAM Identity Center
 	// application associated with your Identity Center instance. If the grant includes
@@ -2317,6 +2341,15 @@ type S3CopyObjectOperation struct {
 	// This functionality is not supported by directory buckets.
 	AccessControlGrants []S3Grant
 
+	// Specifies whether the Batch Operations copy job copies object annotations from
+	// the source object or skips them. If this property isn't specified, COPY is the
+	// default behavior.
+	//
+	// Valid Values: COPY | EXCLUDE
+	//
+	// This functionality is not supported by directory buckets.
+	AnnotationDirective S3AnnotationDirective
+
 	// Specifies whether Amazon S3 should use an S3 Bucket Key for object encryption
 	// with server-side encryption using Amazon Web Services KMS (SSE-KMS). Setting
 	// this header to true causes Amazon S3 to use an S3 Bucket Key for object
@@ -2363,6 +2396,19 @@ type S3CopyObjectOperation struct {
 	// empty tag set in the NewObjectTagging field to prevent copying the source
 	// object tags to the directory bucket.
 	NewObjectTagging []S3Tag
+
+	// The event hold status to be applied to all objects in the Batch Operations copy
+	// job. Set to ON to enable an event hold or OFF to disable it.
+	//
+	// This functionality is not supported by directory buckets.
+	ObjectLockEventHold S3ObjectLockEventHold
+
+	// The event hold duration to be applied to all objects in the Batch Operations
+	// copy job. The duration specifies how long the object remains protected after the
+	// event hold is released.
+	//
+	// This functionality is not supported by directory buckets.
+	ObjectLockEventHoldDuration *S3ObjectLockEventHoldDuration
 
 	// The legal hold status to be applied to all objects in the Batch Operations job.
 	//
@@ -2548,8 +2594,8 @@ type S3JobManifestGenerator struct {
 	// This member is required.
 	SourceBucket *string
 
-	// The Amazon Web Services account ID that owns the bucket the generated manifest
-	// is written to. If provided the generated manifest bucket's owner Amazon Web
+	// The Amazon Web Services account ID that owns the source bucket specified in
+	// SourceBucket . If provided, the manifest source bucket owner's Amazon Web
 	// Services account ID must match this value, else the job fails.
 	ExpectedBucketOwner *string
 
@@ -2596,6 +2642,21 @@ type S3ManifestOutputLocation struct {
 	noSmithyDocumentSerde
 }
 
+// Contains the duration configuration for an event hold, specified in either days
+// or years.
+type S3ObjectLockEventHoldDuration struct {
+
+	// The number of days for the event hold duration. The minimum value is 1 and the
+	// maximum value is 36,500.
+	Days *int32
+
+	// The number of years for the event hold duration. The minimum value is 1 and the
+	// maximum value is 100.
+	Years *int32
+
+	noSmithyDocumentSerde
+}
+
 // Whether S3 Object Lock legal hold will be applied to objects in an S3 Batch
 // Operations job.
 type S3ObjectLockLegalHold struct {
@@ -2605,6 +2666,21 @@ type S3ObjectLockLegalHold struct {
 	//
 	// This member is required.
 	Status S3ObjectLockLegalHoldStatus
+
+	noSmithyDocumentSerde
+}
+
+// Contains the duration configuration for an event hold, specified in either days
+// or years.
+type S3ObjectLockRetentionEventHoldDuration struct {
+
+	// The number of days for the event hold duration. The minimum value is 1 and the
+	// maximum value is 36,500.
+	Days *int32
+
+	// The number of years for the event hold duration. The minimum value is 1 and the
+	// maximum value is 100.
+	Years *int32
 
 	noSmithyDocumentSerde
 }
@@ -2680,6 +2756,15 @@ type S3ReplicateObjectOperation struct {
 //
 // [Using S3 Object Lock retention with S3 Batch Operations]: https://docs.aws.amazon.com/AmazonS3/latest/dev/batch-ops-retention-date.html
 type S3Retention struct {
+
+	// The event hold status to be applied to all objects in the Batch Operations job.
+	// Set to ON to enable an event hold or OFF to disable it.
+	EventHold S3ObjectLockRetentionEventHold
+
+	// The event hold duration to be applied to all objects in the Batch Operations
+	// job. The duration specifies how long the object remains protected after the
+	// event hold is released.
+	EventHoldDuration *S3ObjectLockRetentionEventHoldDuration
 
 	// The Object Lock retention mode to be applied to all objects in the Batch
 	// Operations job.
@@ -2839,9 +2924,8 @@ type SelectionCriteria struct {
 	// The max depth of the selection criteria
 	MaxDepth *int32
 
-	// The minimum number of storage bytes percentage whose metrics will be selected.
-	//
-	// You must choose a value greater than or equal to 1.0 .
+	// The minimum percentage of total bucket storage that a prefix must hold for its
+	// metrics to be included.
 	MinStorageBytesPercentage *float64
 
 	noSmithyDocumentSerde
@@ -2993,6 +3077,10 @@ type StorageLensConfiguration struct {
 	// configuration.
 	AwsOrg *StorageLensAwsOrg
 
+	// A container for the configuration used to publish S3 Storage Lens cost data to
+	// Amazon Web Services Cost and Usage Reports (Amazon Web Services CUR).
+	CostAndUsageReportsPublish *StorageLensCostAndUsageReportsPublish
+
 	// A container to specify the properties of your S3 Storage Lens metrics export
 	// including, the destination, schema and format.
 	DataExport *StorageLensDataExport
@@ -3008,6 +3096,9 @@ type StorageLensConfiguration struct {
 	// A container for what is included in this configuration. This container can only
 	// be valid if there is no Exclude container submitted, and it's not empty.
 	Include *Include
+
+	// A container element for S3 Storage Lens Intelligent-Tiering access tier metrics.
+	IntAccessTiers *IntAccessTiers
 
 	// A container for all prefix delimiters that are used for object keys in this S3
 	// Storage Lens configuration. The prefix delimiters determine how S3 Storage Lens
@@ -3028,6 +3119,57 @@ type StorageLensConfiguration struct {
 	// property is read-only and follows the following format:
 	// arn:aws:s3:us-east-1:example-account-id:storage-lens/your-dashboard-name
 	StorageLensArn *string
+
+	noSmithyDocumentSerde
+}
+
+// A container for the prefix-level configuration that determines the prefixes for
+// which S3 Storage Lens publishes cost data to Amazon Web Services Cost and Usage
+// Reports (Amazon Web Services CUR).
+type StorageLensCostAndUsageReportsPrefixLevel struct {
+
+	// Indicates whether prefix-level cost data publishing to Amazon Web Services CUR
+	// is enabled.
+	//
+	// This member is required.
+	IsEnabled bool
+
+	// A container for the selection criteria that determines the prefix depths for
+	// which cost data is published to Amazon Web Services CUR.
+	SelectionCriteria *StorageLensCostAndUsageReportsSelectionCriteria
+
+	noSmithyDocumentSerde
+}
+
+// A container for the configuration used to publish S3 Storage Lens cost data to
+// Amazon Web Services Cost and Usage Reports (Amazon Web Services CUR).
+type StorageLensCostAndUsageReportsPublish struct {
+
+	// A container for the prefix-level configuration that determines the prefixes for
+	// which S3 Storage Lens publishes cost data to Amazon Web Services CUR.
+	PrefixLevel *StorageLensCostAndUsageReportsPrefixLevel
+
+	noSmithyDocumentSerde
+}
+
+// A container for the selection criteria used by the S3 Storage Lens Amazon Web
+// Services Cost and Usage Reports (Amazon Web Services CUR) publish configuration.
+// The selection criteria specifies the minimum and maximum prefix depth (both
+// inclusive) for which cost data is published to Amazon Web Services CUR. You must
+// provide both MinDepth and MaxDepth together, or neither; MinDepth must be less
+// than or equal to MaxDepth , and the difference must not exceed 4. If neither is
+// provided, MinDepth defaults to 1 and MaxDepth defaults to 3 .
+type StorageLensCostAndUsageReportsSelectionCriteria struct {
+
+	// The maximum prefix depth (inclusive) for which cost data is published to Amazon
+	// Web Services CUR. You must provide both MinDepth and MaxDepth together, or
+	// neither. If neither is provided, MaxDepth defaults to 3 .
+	MaxDepth *int32
+
+	// The minimum prefix depth (inclusive) for which cost data is published to Amazon
+	// Web Services CUR. You must provide both MinDepth and MaxDepth together, or
+	// neither. If neither is provided, MinDepth defaults to 1 .
+	MinDepth *int32
 
 	noSmithyDocumentSerde
 }

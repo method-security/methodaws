@@ -4,15 +4,17 @@ package apigateway
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go-v2/service/apigateway/schemas"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
 )
 
 //	Deletes the DomainNameAccessAssociation resource.
 //
-// Only the AWS account that created the DomainNameAccessAssociation resource can
-// delete it. To stop an access association source in another AWS account from
-// accessing your private custom domain name, use the
-// RejectDomainNameAccessAssociation operation.
+// Only the Amazon Web Services account that created the
+// DomainNameAccessAssociation resource can delete it. To stop an access
+// association source in another Amazon Web Services account from accessing your
+// private custom domain name, use the RejectDomainNameAccessAssociation operation.
 func (c *Client) DeleteDomainNameAccessAssociation(ctx context.Context, params *DeleteDomainNameAccessAssociationInput, optFns ...func(*Options)) (*DeleteDomainNameAccessAssociationOutput, error) {
 	if params == nil {
 		params = &DeleteDomainNameAccessAssociationInput{}
@@ -38,6 +40,18 @@ type DeleteDomainNameAccessAssociationInput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *DeleteDomainNameAccessAssociationInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.DeleteDomainNameAccessAssociationRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *DeleteDomainNameAccessAssociationInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.DomainNameAccessAssociationArn != nil {
+		s.WriteString(schemas.DeleteDomainNameAccessAssociationRequest_domainNameAccessAssociationArn, *v.DomainNameAccessAssociationArn)
+	}
+}
+
 type DeleteDomainNameAccessAssociationOutput struct {
 	// Metadata pertaining to the operation's result.
 	ResultMetadata middleware.Metadata
@@ -45,19 +59,29 @@ type DeleteDomainNameAccessAssociationOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *DeleteDomainNameAccessAssociationOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(nil)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *DeleteDomainNameAccessAssociationOutput) SerializeMembers(s smithy.ShapeSerializer) {
+}
+func (v *DeleteDomainNameAccessAssociationOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, nil, func(s *smithy.Schema) error {
+		switch s {
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationDeleteDomainNameAccessAssociationMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	err = stack.Serialize.Add(&awsRestjson1_serializeOpDeleteDomainNameAccessAssociation{}, middleware.After)
-	if err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.DeleteDomainNameAccessAssociation, schemas.DeleteDomainNameAccessAssociationRequest, nil)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Deserialize.Add(&awsRestjson1_deserializeOpDeleteDomainNameAccessAssociation{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.DeleteDomainNameAccessAssociation, schemas.DeleteDomainNameAccessAssociationRequest, nil), output: &DeleteDomainNameAccessAssociationOutput{}}, middleware.After); err != nil {
 		return err
 	}
 
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
